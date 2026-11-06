@@ -209,8 +209,10 @@ Run `build_music_rack.py` for a new rack. The other `build_music_rack.*` files a
 - **CABLE Output is not in the device menu.** Install VB-Cable, reboot, and run `listen_cable.py` again. The script stays on File until that device is visible.
 - **Parameter Execute type not found.** The script looks up `parameterexecuteDAT`, `parexecDAT`, and `parexecuteDAT` because the operator type name is injected by TouchDesigner. Use 2023.12480, which is the build this lookup was written against.
 
-## Sharing this repository
+## License
 
-Git is local only. No remote is configured, and there is no `LICENSE` file yet.
+MIT. See [LICENSE](LICENSE). Copyright (c) 2026 Hellcatxrp.
 
-Before a public push, add a license, and decide whether the older experiment scripts and `_preview/` stills should stay in the tree. Audio in the music folder stays outside this repository.
+Source: [https://github.com/hellcatxrp/neon_terrain](https://github.com/hellcatxrp/neon_terrain)
+
+Audio in the music folder stays outside this repository. The older experiment scripts and `_preview/` stills are part of the tree.
