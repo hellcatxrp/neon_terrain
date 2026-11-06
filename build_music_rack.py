@@ -450,6 +450,17 @@ def add_float(page, name, label, default, lo, hi):
     return par
 
 
+def add_title_par(page):
+    """String under Music Folder. Empty draws nothing."""
+    owner = getattr(page, 'owner', None)
+    if owner is not None and hasattr(owner.par, 'Titleanim'):
+        return owner.par.Titleanim
+    par = as_par(page.appendStr('Titleanim', label='Title Animation'))
+    par.default = ''
+    par.val = ''
+    return par
+
+
 VISUAL_CONTROLS = (
     ('Motion', 'Motion', 1.0, 0, 3),
     ('Punch', 'Kick Punch', 1.0, 0, 2),
@@ -486,6 +497,7 @@ def add_controls(rack):
     folder = as_par(page.appendStr('Musicfolder', label='Music Folder'))
     folder.default = MUSIC_DIR
     folder.val = MUSIC_DIR
+    add_title_par(page)
     return track
 
 
@@ -501,6 +513,7 @@ def ensure_visual_controls(rack):
     for spec in VISUAL_CONTROLS:
         if not hasattr(rack.par, spec[0]):
             add_float(page, *spec)
+    add_title_par(page)
 
 
 def add_folder_dat(rack):
@@ -581,6 +594,7 @@ def add_readme(rack):
         'Low/Mid/High/RMS Gain and Kick Threshold only shape audio_out.',
         '',
         'New files: drop them in the music folder, then pulse Reload Tracks.',
+        'Title Animation: type a line and it crosses the sky. Empty draws nothing.',
         'Visuals you build later should read only audio_out (and spectrum if they need the curve).',
         'Running the build script again replaces this whole component.',
     ])
@@ -858,14 +872,16 @@ def onCook(scriptOp):
 
 VISUAL_SHADER = r'''
 layout(location = 0) out vec4 fragColor;
-uniform float uTime;    // music clock from vis_features
-uniform float uPunch;   // Kick Punch slider
-uniform float uClock;   // wall clock, for grain and star twinkle only
+uniform float uTime;       // music clock from vis_features
+uniform float uPunch;      // Kick Punch slider
+uniform float uClock;      // wall clock, for grain, stars, and the title crossing
+uniform float uTitleStart; // wall-clock time of the last Title Animation edit
 
 // Input 0, one row from vis_features:
 //   0 low, 1 mid, 2 high, 3 rms, 4 kick, 5 section, 6 flux
 // Input 1, from spec_shape: 64 bands wide, bass first. Rows: order marker (2.0),
 //   live spectrum, 40 snapshots newest first, scroll fraction.
+// Input 2, title_card: white glyphs, transparent ground. Empty text draws nothing.
 
 const int HIST = 41;            // live row + 40 snapshots
 const float CAM = 0.55;         // how far below the horizon the front row sits
@@ -947,6 +963,49 @@ void duo(float s, out vec3 a, out vec3 b)
     b = mix(B[i], B[i + 1], f);
 }
 
+// Glyph coverage. Coordinates outside the card contribute nothing.
+float titleGlyph(vec2 texUV)
+{
+    float inside = step(0.0, texUV.x) * step(texUV.x, 1.0) * step(0.0, texUV.y) * step(texUV.y, 1.0);
+    return texture(sTD2DInputs[2], clamp(texUV, 0.0, 1.0)).a * inside;
+}
+
+// One readable crossing, then a gap, then it comes around again.
+// The clock is the wall clock, so a drop does not smear the words.
+vec3 titleBanner(vec2 uv, float horizon, vec3 ink, float musicTime)
+{
+    float period = 34.0;
+    float flyDur = 16.0;
+    float phase = mod(uClock - uTitleStart, period);
+    if (phase < 0.0 || phase >= flyDur) {
+        return vec3(0.0);
+    }
+    ivec2 size = textureSize(sTD2DInputs[2], 0);
+    if (size.x < 2 || size.y < 2) {
+        return vec3(0.0);
+    }
+    float travel = phase / flyDur;
+    float pixH = 104.0;
+    float uvH = pixH / 720.0;
+    float uvW = min((pixH * float(size.x) / float(size.y)) / 1280.0, 1.15);
+    float bob = sin(musicTime * 0.11) * 0.006;
+    float cx = mix(1.0 + uvW * 0.5, -uvW * 0.5, travel);
+    float cy = 0.84 + bob;
+    vec2 local = (uv - vec2(cx, cy)) / vec2(uvW, uvH) + 0.5;
+    float a = titleGlyph(local);
+    float trail = titleGlyph(local - vec2(0.018, 0.0)) * 0.32
+        + titleGlyph(local - vec2(0.038, 0.0)) * 0.14;
+    vec2 texel = 1.0 / vec2(size);
+    float halo = titleGlyph(local + vec2(texel.x * 5.0, 0.0))
+        + titleGlyph(local + vec2(-texel.x * 5.0, 0.0))
+        + titleGlyph(local + vec2(0.0, texel.y * 4.0))
+        + titleGlyph(local + vec2(0.0, -texel.y * 4.0));
+    halo *= 0.22;
+    float skyFade = smoothstep(horizon + 0.03, horizon + 0.11, uv.y);
+    vec3 rgb = mix(ink, vec3(1.0), 0.42);
+    return rgb * (a * 1.2 + halo + trail) * skyFade;
+}
+
 void main()
 {
     readLayout();
@@ -1024,6 +1083,7 @@ void main()
     }
 
     vec3 col = (hidden ? fill : sky) + lines * (1.0 + punch * 0.3);
+    col += titleBanner(uv, horizon, cA, t);
 
     vec2 vq = uv - 0.5;
     col *= 1.0 - dot(vq, vq) * 0.9;
@@ -1067,11 +1127,165 @@ def make_script_chop(rack, name, text, x, y):
     return node
 
 
+TITLE_CALLBACKS = r'''
+def _mark(flight):
+    if flight is None:
+        return
+    now = absTime.seconds
+    if hasattr(flight.par, 'const0value'):
+        flight.par.const0value = now
+    elif hasattr(flight.par, 'value0'):
+        flight.par.value0 = now
+    try:
+        flight.cook(force=True)
+    except Exception:
+        pass
+
+
+def onValueChange(par, prev):
+    if par.name != 'Titleanim':
+        return
+    _mark(par.owner.op('title_flight'))
+    return
+
+
+def onValuesChanged(changes):
+    for change in changes:
+        onValueChange(change.par, getattr(change, 'prev', None))
+    return
+
+
+def onPulse(par):
+    return
+
+
+def onExpressionChange(par, prev):
+    return
+
+
+def onExportChange(par, prev):
+    return
+'''
+
+
+def _set_named(node, names, value):
+    for name in names:
+        if hasattr(node.par, name):
+            setattr(node.par, name, value)
+            return True
+    return False
+
+
+def _pad(par, pixels, fraction):
+    hi = getattr(par, 'max', None)
+    try:
+        hi = float(hi)
+    except (TypeError, ValueError):
+        hi = None
+    par.val = fraction if hi is not None and hi <= 2.0 else pixels
+
+
+def add_title_card(rack):
+    """Text TOP plus the clock that restarts the crossing when the field changes."""
+    title = place(rack.create(textTOP, 'title_card'), 1260, 280)
+    title.color = (0.95, 0.78, 0.35)
+    set_top_res(title, 2048, 256)
+    if hasattr(title.par, 'resmult'):
+        title.par.resmult = False
+    if hasattr(title.par, 'format'):
+        choose(title.par.format, 'rgba8fixed')
+    set_expr(title, 'text', 'parent().par.Titleanim')
+    if hasattr(title.par, 'legacyparsing'):
+        title.par.legacyparsing = False
+    if hasattr(title.par, 'chopvaluereplace'):
+        title.par.chopvaluereplace = False
+    if hasattr(title.par, 'wordwrap'):
+        title.par.wordwrap = False
+    if hasattr(title.par, 'font'):
+        choose(title.par.font, 'Arial', 'Segoe UI', 'Verdana')
+    if hasattr(title.par, 'bold'):
+        title.par.bold = True
+    if hasattr(title.par, 'dispmethod'):
+        choose(title.par.dispmethod, 'scalable', 'polygon')
+    if hasattr(title.par, 'antialias'):
+        choose(title.par.antialias, 'aa16mid', 'aa8high', 'aa8')
+    if hasattr(title.par, 'fontautosize'):
+        choose(title.par.fontautosize, 'alwaysfit')
+    if hasattr(title.par, 'fontsizex'):
+        title.par.fontsizex = 170
+    if hasattr(title.par, 'fontsizexunit'):
+        choose(title.par.fontsizexunit, 'pixels')
+    if hasattr(title.par, 'keepfontratio'):
+        title.par.keepfontratio = True
+    if hasattr(title.par, 'alignx'):
+        choose(title.par.alignx, 'center')
+    if hasattr(title.par, 'aligny'):
+        choose(title.par.aligny, 'center')
+    if hasattr(title.par, 'alignxmode'):
+        choose(title.par.alignxmode, 'bbox')
+    if hasattr(title.par, 'alignymode'):
+        choose(title.par.alignymode, 'bbox')
+    unit = None
+    if hasattr(title.par, 'positionunit'):
+        unit = choose(title.par.positionunit, 'fraction')
+    if hasattr(title.par, 'position1'):
+        title.par.position1 = 0.5 if unit == 'fraction' else 1024
+    if hasattr(title.par, 'position2'):
+        title.par.position2 = 0.5 if unit == 'fraction' else 128
+    for name, pixels, fraction in (('borderspace1', 64, 0.04), ('borderspace2', 36, 0.12)):
+        if hasattr(title.par, name):
+            _pad(getattr(title.par, name), pixels, fraction)
+    if hasattr(title.par, 'multrgbbyalpha'):
+        title.par.multrgbbyalpha = True
+    for name, value in (
+        ('fontcolorr', 1), ('fontcolorg', 1), ('fontcolorb', 1), ('fontalpha', 1),
+        ('bgcolorr', 0), ('bgcolorg', 0), ('bgcolorb', 0), ('bgalpha', 0),
+    ):
+        if hasattr(title.par, name):
+            setattr(title.par, name, value)
+
+    flight = place(rack.create(constantCHOP, 'title_flight'), 980, 280)
+    flight.color = (0.95, 0.78, 0.35)
+    _set_named(flight, ('const0name', 'name0'), 'start')
+    try:
+        now = float(absTime.seconds)
+    except Exception:
+        now = 0.0
+    if not _set_named(flight, ('const0value', 'value0'), now):
+        print('music_rack: title clock has no value parameter. The crossing will not restart when you type.')
+    try:
+        flight.cook(force=True)
+    except Exception as err:
+        print('music_rack: title clock:', err)
+
+    callbacks = place(
+        rack.create(td_type('parameterexecuteDAT', 'parexecDAT', 'parexecuteDAT'), 'title_callbacks'),
+        700, 280)
+    callbacks.text = TITLE_CALLBACKS
+    try:
+        callbacks.par.op = rack
+    except Exception:
+        callbacks.par.op = rack.path
+    if hasattr(callbacks.par, 'pars'):
+        callbacks.par.pars = 'Titleanim'
+    if hasattr(callbacks.par, 'custom'):
+        callbacks.par.custom = True
+    if hasattr(callbacks.par, 'builtin'):
+        callbacks.par.builtin = False
+    if hasattr(callbacks.par, 'valuechange'):
+        callbacks.par.valuechange = True
+    if hasattr(callbacks.par, 'valueschanged'):
+        callbacks.par.valueschanged = False
+    callbacks.par.active = True
+    return title
+
+
 def install_visual(rack):
     """Replace the picture with the neon spectrum terrain.
 
     Leaves the player, the track menu, and audio_out alone. The picture reads
     the raw band levels through vis_features and the spectrum through spec_shape.
+    Title Animation, when filled in, crosses the sky on input 2.
     """
     if rack is None:
         print('music_rack: /project1/music_rack is missing.')
@@ -1083,6 +1297,7 @@ def install_visual(rack):
         'spec_mag', 'spec_order', 'spec_bins', 'spec_lag', 'spec_gain', 'spec_limit', 'spec_image',
         'vis_features', 'vis_features_callbacks', 'spec_shape', 'spec_shape_callbacks',
         'cycle_sim', 'cycle_arena', 'cycle_arena_callbacks', 'cycle_hist', 'cycle_hist_callbacks',
+        'title_card', 'title_flight', 'title_callbacks',
     ):
         destroy_named(rack, name)
 
@@ -1138,7 +1353,8 @@ def install_visual(rack):
     if hasattr(visual.par, 'format'):
         choose(visual.par.format, 'rgba16float', 'rgba8fixed')
     if hasattr(visual.par, 'inputfiltertype'):
-        choose(visual.par.inputfiltertype, 'nearest')
+        # texelFetch ignores this. Linear keeps the title glyphs smooth.
+        choose(visual.par.inputfiltertype, 'linear')
     if hasattr(visual.par, 'fillmode'):
         choose(visual.par.fillmode, 'best')
     if hasattr(visual.par, 'pixeldat'):
@@ -1146,13 +1362,17 @@ def install_visual(rack):
     else:
         print('music_rack: GLSL TOP has no pixeldat parameter.')
         print('  shader parameters:', [p.name for p in visual.pars() if 'dat' in p.name.lower() or 'shader' in p.name.lower()])
+    title = add_title_card(rack)
     bind_uniforms(visual, [
         ('uTime', "op('vis_features')['time']"),
         ('uPunch', 'parent().par.Punch'),
         ('uClock', 'absTime.seconds'),
+        ('uTitleStart', "op('title_flight')[0]"),
     ])
     wire(visual, levels_image, 0)
     wire(visual, spec_image, 1)
+    if not wire(visual, title, 2):
+        print('music_rack: the GLSL TOP has no third input, so the title cannot cross the sky.')
     visual.viewer = True
 
     preview = place(rack.create(nullTOP, 'preview'), 1820, 80)
@@ -1195,6 +1415,8 @@ def install_visual(rack):
     print('older moments recede toward the horizon. It rushes in loud sections and nearly')
     print('freezes in quiet ones. Kicks flare the front line; colour follows the section.')
     print('Tune on the Music page: Motion, Kick Punch, Onset Threshold.')
+    print('Title Animation is under Music Folder. A line there crosses the sky,')
+    print('waits, then crosses again. Clear the field and the sky stays empty.')
     return preview
 
 

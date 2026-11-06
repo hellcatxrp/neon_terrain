@@ -209,6 +209,20 @@ Run `build_music_rack.py` for a new rack. The other `build_music_rack.*` files a
 - **CABLE Output is not in the device menu.** Install VB-Cable, reboot, and run `listen_cable.py` again. The script stays on File until that device is visible.
 - **Parameter Execute type not found.** The script looks up `parameterexecuteDAT`, `parexecDAT`, and `parexecuteDAT` because the operator type name is injected by TouchDesigner. Use 2023.12480, which is the build this lookup was written against.
 
+## Title banner
+
+This branch adds **Title Animation** under **Music Folder**. `main` does not have it.
+
+After you check out this branch, open the textport (Alt+T) and paste:
+
+```python
+exec(open(r'C:\Users\James\Desktop\TOUCH\upgrade_visual.py', encoding='utf-8').read())
+```
+
+That replaces the picture and leaves the player, the track, and Play alone. Type a line into **Title Animation**. It crosses the sky once over about 16 seconds, waits, then crosses again. Clearing the field draws nothing. Changing the field starts the crossing over.
+
+To go back to the picture without the banner, check out `main` and run that same line. To return here, check out `title-banner` and run it again.
+
 ## License
 
 MIT. See [LICENSE](LICENSE). Copyright (c) 2026 Hellcatxrp.
