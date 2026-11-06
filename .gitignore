@@ -1,0 +1,16 @@
+# Python bytecode (TouchDesigner and local tools)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# TouchDesigner crash and autosave clutter
+*.toe.autosave
+CrashAutoSave.*
+*.crash
+
+# OS and editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vs/
+.idea/

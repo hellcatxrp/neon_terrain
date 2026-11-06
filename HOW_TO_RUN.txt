@@ -1,0 +1,120 @@
+MUSIC VISUALISER - HOW TO RUN
+=============================
+
+EASIEST: after building once, save the project (Ctrl+S) into this folder.
+Next time just open that .toe file. Everything is already there.
+
+Then: click music_rack, open the Music page on the right,
+pick a Track, set Volume, turn Play on. Open "preview" (press v) to watch.
+
+Two audio setups are below. Switch between them when you want the visualiser
+on a Discord call, and when you want the PC back to normal for games,
+Spotify, YouTube, and ordinary listening. The Suno bot is not involved.
+Leave the microphone as your real mic the whole time. Never set it to
+CABLE Output or CABLE Input.
+
+
+NORMAL — games, Spotify, YouTube, everyday Discord
+--------------------------------------------------
+This is how the PC was before the cable. Windows plays everything straight
+to the headset. TouchDesigner plays a file from the music folder only when
+you turn Play on.
+
+1. Windows Settings, System, Sound. Set Output device to
+   "Speakers (SteelSeries Arctis 1 Wireless)".
+   Leave it there in both modes. Do not set the system output to CABLE Input.
+   That would send the whole PC into the cable.
+
+2. Discord, User Settings, Voice & Video. Set Output Device to
+   "Speakers (SteelSeries Arctis 1 Wireless)".
+
+3. Press Win+R, run mmsys.cpl, open the Recording tab, double-click
+   "CABLE Output". On the Listen tab, untick "Listen to this device".
+   Click Apply. This is the small Sound window with Playback and Recording
+   tabs, not the Windows Settings volume mixer.
+
+4. In TouchDesigner, click music_rack, open the Music page, set Source to
+   File. Pick a Track, set Volume, turn Play on. The picture follows that
+   file. Set Play off when you are done with it.
+
+Spotify, YouTube, and games use the Windows output from step 1, so they
+are already on the headset once Discord is back on the Arctis and Listen
+is off.
+
+
+VISUALISER — Discord voice channel into TouchDesigner and the headset
+---------------------------------------------------------------------
+Use this for a King of the Hill night or while the radio ladder is on.
+Whatever Discord is playing in the voice channel drives the picture.
+You hear that same call in the headset. Other apps still use the Arctis
+directly, because only Discord is moved onto the cable.
+
+1. Windows Settings, System, Sound. Output device stays
+   "Speakers (SteelSeries Arctis 1 Wireless)".
+
+2. Discord, User Settings, Voice & Video. Set Output Device to
+   "CABLE Input (VB-Audio Virtual Cable)".
+   Leave the input device as your real microphone.
+
+3. Press Win+R, run mmsys.cpl, open the Recording tab, double-click
+   "CABLE Output". On the Listen tab, tick "Listen to this device".
+   Set "Playback through this device" to
+   "Speakers (SteelSeries Arctis 1 Wireless)". Click Apply.
+
+4. In TouchDesigner, click music_rack, open the Music page, set Source to
+   "Voice channel". The first time that option is missing, open the
+   textport (Alt+T) and paste this one line:
+
+   exec(open(r'C:\Users\James\Desktop\TOUCH\listen_cable.py', encoding='utf-8').read())
+
+   That adds the cable input and switches Source to Voice channel.
+   After that, the Music page menu is enough. You do not need the line again.
+
+5. Open "preview" (press v on that operator). Screen-share that window
+   with its audio off, so the room still hears the bot once.
+
+The picture should move with the song. You should hear the call in the
+Arctis. If the picture moves and the headset stays silent, open the
+SteelSeries app and re-pair the Arctis, then check step 3 again.
+
+
+SWITCHING BACK AND FORTH
+------------------------
+Visualiser night to normal PC: do steps 2, 3, and 4 of NORMAL.
+Normal PC to a call: do steps 2, 3, and 4 of VISUALISER.
+
+Save the project (Ctrl+S) after the first cable setup so Source and the
+cable input are still there next time you open the .toe file.
+
+
+BUILD FROM SCRATCH (new or empty project)
+-----------------------------------------
+Open the Textport (Alt+T) and paste this one line:
+
+exec(open(r'C:\Users\James\Desktop\TOUCH\build_music_rack.py', encoding='utf-8').read())
+
+This creates /project1/music_rack: player, track menu, analysis, and the picture.
+
+
+REFRESH ONLY THE PICTURE (music_rack already exists)
+----------------------------------------------------
+exec(open(r'C:\Users\James\Desktop\TOUCH\upgrade_visual.py', encoding='utf-8').read())
+
+Keeps the player, track choice and Play as they are.
+
+
+SLIDERS (Music page)
+--------------------
+Motion           how fast the terrain scrolls with the music
+Kick Punch       how hard the front line flares on kicks
+Onset Threshold  lower = catches more kicks
+New music: drop files into Desktop\MUSIC_SUNO, then press Reload Tracks.
+
+
+VERSIONS IN THIS FOLDER
+-----------------------
+build_music_rack.py                     current: neon spectrum terrain
+build_music_rack.v3_terrain.py          same terrain version (backup)
+build_music_rack.v2_cloud.py            older colour cloud version
+build_music_rack.before_visual_rework.py  original
+build_music_rack.v4_cycle.py            light-cycle experiment (did not work, unused)
