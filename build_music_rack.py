@@ -986,9 +986,11 @@ vec3 titleBanner(vec2 uv, float horizon, vec3 ink, float musicTime)
     }
     float travel = phase / flyDur;
     // Whole card on screen. A long line shrinks instead of losing letters.
+    // The card has empty margin around the glyphs, so the quad is taller
+    // than the letters. 168px keeps the letters about the same size.
     vec2 frame = vec2(1280.0, 720.0);
     float aspect = float(size.x) / float(size.y);
-    float pixH = 104.0;
+    float pixH = 168.0;
     float pixW = pixH * aspect;
     float maxW = frame.x * 0.92;
     if (pixW > maxW) {
@@ -999,7 +1001,8 @@ vec3 titleBanner(vec2 uv, float horizon, vec3 ink, float musicTime)
     float uvH = pixH / frame.y;
     float bob = sin(musicTime * 0.11) * 0.006;
     float cx = mix(1.0 + uvW * 0.5, -uvW * 0.5, travel);
-    float cy = 0.84 + bob;
+    // Open sky, below the top edge. Horizon sits near 0.64.
+    float cy = 0.75 + bob;
     vec2 local = (uv - vec2(cx, cy)) / vec2(uvW, uvH) + 0.5;
     float a = titleGlyph(local);
     vec2 texel = 2.0 / vec2(size);
@@ -1008,7 +1011,7 @@ vec3 titleBanner(vec2 uv, float horizon, vec3 ink, float musicTime)
         + titleGlyph(local + vec2(0.0, texel.y))
         + titleGlyph(local - vec2(0.0, texel.y));
     halo *= 0.18;
-    float skyFade = smoothstep(horizon + 0.03, horizon + 0.11, uv.y);
+    float skyFade = smoothstep(horizon - 0.04, horizon + 0.02, uv.y);
     vec3 rgb = mix(ink, vec3(1.0), 0.42);
     return rgb * (a + halo) * skyFade * 1.15;
 }
@@ -1134,7 +1137,163 @@ def make_script_chop(rack, name, text, x, y):
     return node
 
 
-TITLE_CALLBACKS = r'''
+# Shared by the builder and by title_callbacks. The line is drawn from a
+# pixel anchor, then the card is grown around that anchor. A center anchor
+# left over from the previous resolution was pushing the tail off the card.
+TITLE_FIT = r'''
+def _pick(par, options):
+    try:
+        names = list(par.menuNames)
+    except Exception:
+        names = []
+    for opt in options:
+        if opt in names:
+            par.val = opt
+            return opt
+    return None
+
+
+def _set_res(card, wide, high):
+    wide = int(max(64, min(8192, wide)))
+    high = int(max(64, min(1024, high)))
+    if hasattr(card.par, 'outputresolution'):
+        _pick(card.par.outputresolution, ('custom', 'customres'))
+    if hasattr(card.par, 'resmult'):
+        card.par.resmult = False
+    if hasattr(card.par, 'resolutionw'):
+        card.par.resolutionw = wide
+    if hasattr(card.par, 'resolutionh'):
+        card.par.resolutionh = high
+    return wide, high
+
+
+def _anchor(card, x, y, wide, high):
+    unit = None
+    if hasattr(card.par, 'positionunit'):
+        unit = _pick(card.par.positionunit, ('pixels', 'pixel'))
+        if unit is None:
+            unit = _pick(card.par.positionunit, ('fraction', 'frac'))
+            if unit is not None and wide and high:
+                x = float(x) / float(wide)
+                y = float(y) / float(high)
+    if hasattr(card.par, 'position1'):
+        card.par.position1 = x
+    if hasattr(card.par, 'position2'):
+        card.par.position2 = y
+
+
+def _measure(card, sample):
+    width = 0.0
+    height = 0.0
+    try:
+        width = float(card.textWidth)
+    except Exception:
+        width = 0.0
+    try:
+        height = float(card.textHeight)
+    except Exception:
+        height = 0.0
+    try:
+        asc = float(card.ascender)
+        desc = float(card.descender)
+        metrics_h = (asc - desc) if desc < asc else (asc + abs(desc))
+        if metrics_h > height:
+            height = metrics_h
+    except Exception:
+        pass
+    try:
+        measured = card.evalTextSize(sample)
+        width = max(width, float(measured[0]))
+        height = max(height, float(measured[1]))
+    except Exception:
+        pass
+    return width, height
+
+
+def _fit(card):
+    # Lay the whole string out from a fixed pixel anchor, with empty rows
+    # above the ascenders. The previous card clipped the tail and the tops.
+    if card is None:
+        return
+    raw = ''
+    try:
+        raw = str(card.parent().par.Titleanim.eval() or '')
+    except Exception:
+        raw = ''
+    sample = raw if raw.strip() else ' '
+    if hasattr(card.par, 'wordwrap'):
+        card.par.wordwrap = False
+    if hasattr(card.par, 'fontautosize'):
+        _pick(card.par.fontautosize, ('nofit',))
+    if hasattr(card.par, 'fontsizex'):
+        card.par.fontsizex = 120
+    if hasattr(card.par, 'fontsizexunit'):
+        _pick(card.par.fontsizexunit, ('pixels',))
+    if hasattr(card.par, 'keepfontratio'):
+        card.par.keepfontratio = True
+    if hasattr(card.par, 'alignx'):
+        _pick(card.par.alignx, ('left',))
+    if hasattr(card.par, 'alignxmode'):
+        _pick(card.par.alignxmode, ('bbox', 'metrics'))
+    y_align = None
+    if hasattr(card.par, 'aligny'):
+        y_align = _pick(card.par.aligny, ('baseline', 'bottom'))
+    if hasattr(card.par, 'alignymode'):
+        if y_align == 'baseline':
+            _pick(card.par.alignymode, ('metrics', 'bbox'))
+        else:
+            _pick(card.par.alignymode, ('bbox', 'metrics'))
+    # Measure on a canvas the line cannot fill.
+    _set_res(card, 4096, 512)
+    _anchor(card, 96, 120, 4096, 512)
+    try:
+        card.cook(force=True)
+    except Exception as err:
+        print('music_rack: title cook:', err)
+        return
+    try:
+        if int(card.numLines) > 1 and hasattr(card.par, 'wordwrap'):
+            card.par.wordwrap = False
+            card.cook(force=True)
+    except Exception:
+        pass
+    width, height = _measure(card, sample)
+    if width < 1.0:
+        width = 64.0
+    if height < 1.0:
+        height = 160.0
+    # A single 120px line is well under this. A larger reading usually
+    # includes the anchor offset, and growing the card by that much
+    # shrinks the letters.
+    if height > 480.0:
+        height = 480.0
+    pad_x = 64
+    pad_top = 88
+    pad_bot = 72
+    wide, high = _set_res(card, width + pad_x * 2, height + pad_top + pad_bot)
+    _anchor(card, pad_x, pad_bot, wide, high)
+    # Stay at the measured size. Auto-fit sizes to the card, then the anchor
+    # shifts that block and the tail falls off the right edge again.
+    if hasattr(card.par, 'fontautosize'):
+        _pick(card.par.fontautosize, ('nofit',))
+    for name in ('borderspace1', 'borderspace2'):
+        if hasattr(card.par, name):
+            getattr(card.par, name).val = 0
+    try:
+        card.cook(force=True)
+        used, _used_h = _measure(card, sample)
+        if used + pad_x > wide - 8 and wide < 8192:
+            wide, high = _set_res(card, used + pad_x * 2, high)
+            _anchor(card, pad_x, pad_bot, wide, high)
+            card.cook(force=True)
+        print('music_rack: title %r card %sx%s line %sx%s' % (
+            raw, card.width, card.height, int(width), int(height)))
+    except Exception as err:
+        print('music_rack: title card:', err)
+'''
+
+
+TITLE_CALLBACKS = TITLE_FIT + r'''
 def _mark(flight):
     if flight is None:
         return
@@ -1147,51 +1306,6 @@ def _mark(flight):
         flight.cook(force=True)
     except Exception:
         pass
-
-
-def _fit(card):
-    # Size the card to the whole string. A fixed card clips long titles.
-    if card is None:
-        return
-    raw = ''
-    try:
-        raw = str(card.parent().par.Titleanim.eval() or '')
-    except Exception:
-        raw = ''
-    sample = raw if raw.strip() else ' '
-    try:
-        card.cook(force=True)
-        measured = card.evalTextSize(sample)
-        width = float(measured[0])
-        height = float(measured[1])
-    except Exception:
-        try:
-            width = float(card.textWidth)
-            height = float(card.textHeight)
-        except Exception as err:
-            print('music_rack: title measure:', err)
-            return
-    if height < 1.0:
-        height = 140.0
-    pad_y = max(32, int(height * 0.45))
-    w = max(64, min(8192, int(width + 64)))
-    h = max(64, min(1024, int(height + pad_y)))
-    if hasattr(card.par, 'outputresolution'):
-        try:
-            card.par.outputresolution = 'custom'
-        except Exception:
-            pass
-    if hasattr(card.par, 'resmult'):
-        card.par.resmult = False
-    if hasattr(card.par, 'resolutionw'):
-        card.par.resolutionw = w
-    if hasattr(card.par, 'resolutionh'):
-        card.par.resolutionh = h
-    try:
-        card.cook(force=True)
-        print('music_rack: title %r card %sx%s' % (raw, card.width, card.height))
-    except Exception as err:
-        print('music_rack: title card:', err)
 
 
 def onValueChange(par, prev):
@@ -1230,47 +1344,12 @@ def _set_named(node, names, value):
 
 
 def fit_title_card(card):
-    """Grow the card to the measured line so the tail is not clipped."""
+    """Grow the card around the line so the tail and the ascenders stay inside."""
     if card is None:
         return
-    raw = ''
-    try:
-        raw = str(card.parent().par.Titleanim.eval() or '')
-    except Exception:
-        raw = ''
-    sample = raw if raw.strip() else ' '
-    try:
-        card.cook(force=True)
-        measured = card.evalTextSize(sample)
-        width = float(measured[0])
-        height = float(measured[1])
-    except Exception as err:
-        print('music_rack: title measure:', err)
-        try:
-            width = float(card.textWidth)
-            height = float(card.textHeight)
-        except Exception as err2:
-            print('music_rack: title measure:', err2)
-            return
-    if height < 1.0:
-        height = 140.0
-    pad_y = max(32, int(height * 0.45))
-    wide = max(64, min(8192, int(width + 64)))
-    high = max(64, min(1024, int(height + pad_y)))
-    if hasattr(card.par, 'outputresolution'):
-        choose(card.par.outputresolution, 'custom', 'customres')
-    if hasattr(card.par, 'resmult'):
-        card.par.resmult = False
-    if hasattr(card.par, 'resolutionw'):
-        card.par.resolutionw = wide
-    if hasattr(card.par, 'resolutionh'):
-        card.par.resolutionh = high
-    try:
-        card.cook(force=True)
-        print('music_rack: title %r card %sx%s (glyphs %sx%s)' % (
-            raw, card.width, card.height, int(width), int(height)))
-    except Exception as err:
-        print('music_rack: title card:', err)
+    ns = {}
+    exec(TITLE_FIT, ns)
+    ns['_fit'](card)
 
 
 def add_title_card(rack):
@@ -1298,7 +1377,6 @@ def add_title_card(rack):
     if hasattr(title.par, 'antialias'):
         choose(title.par.antialias, 'aa16mid', 'aa8high', 'aa8')
     if hasattr(title.par, 'fontautosize'):
-        # Fixed size. Auto-fit was leaving the tail of the line outside the card.
         choose(title.par.fontautosize, 'nofit')
     if hasattr(title.par, 'fontsizex'):
         title.par.fontsizex = 120
@@ -1306,24 +1384,6 @@ def add_title_card(rack):
         choose(title.par.fontsizexunit, 'pixels')
     if hasattr(title.par, 'keepfontratio'):
         title.par.keepfontratio = True
-    if hasattr(title.par, 'alignx'):
-        choose(title.par.alignx, 'center')
-    if hasattr(title.par, 'aligny'):
-        choose(title.par.aligny, 'center')
-    if hasattr(title.par, 'alignxmode'):
-        choose(title.par.alignxmode, 'bbox')
-    if hasattr(title.par, 'alignymode'):
-        choose(title.par.alignymode, 'bbox')
-    unit = None
-    if hasattr(title.par, 'positionunit'):
-        unit = choose(title.par.positionunit, 'fraction')
-    if hasattr(title.par, 'position1'):
-        title.par.position1 = 0.5 if unit == 'fraction' else 1024
-    if hasattr(title.par, 'position2'):
-        title.par.position2 = 0.5 if unit == 'fraction' else 128
-    for name in ('borderspace1', 'borderspace2'):
-        if hasattr(title.par, name):
-            getattr(title.par, name).val = 0
     if hasattr(title.par, 'multrgbbyalpha'):
         title.par.multrgbbyalpha = True
     for name, value in (
