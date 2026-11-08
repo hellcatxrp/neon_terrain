@@ -96,11 +96,30 @@ exec(open(r'C:\Users\James\Desktop\TOUCH\build_music_rack.py', encoding='utf-8')
 This creates /project1/music_rack: player, track menu, analysis, and the picture.
 
 
-REFRESH ONLY THE PICTURE (music_rack already exists)
+CURRENT PICTURE — crown line and the King of the Hill gif
+---------------------------------------------------------
+Open the project, then open the Textport (Alt+T) and paste this one line:
+
+exec(open(r'C:\Users\James\Desktop\TOUCH\add_gif.py', encoding='utf-8').read())
+
+The resting line becomes a crown on every row, and the gif sits in the
+lower centre under the line. Preview stays on visual. Save (Ctrl+S)
+when it looks right. Next time, open that .toe and the picture is already there.
+
+Gif Scale, Gif X, and Gif Y are on crown_vis, on the Gif page.
+A larger Gif Scale brings the art up toward the line.
+
+To put the flat line back, paste:
+
+exec(open(r'C:\Users\James\Desktop\TOUCH\restore_picture.py', encoding='utf-8').read())
+
+
+REFRESH THE FLAT TERRAIN (music_rack already exists)
 ----------------------------------------------------
 exec(open(r'C:\Users\James\Desktop\TOUCH\upgrade_visual.py', encoding='utf-8').read())
 
-Keeps the player, track choice and Play as they are.
+Keeps the player, track choice and Play as they are, and rebuilds the
+flat line. Paste the add_gif.py line above to put the crown and the gif back.
 
 
 SLIDERS (Music page)
@@ -108,12 +127,17 @@ SLIDERS (Music page)
 Motion           how fast the terrain scrolls with the music
 Kick Punch       how hard the front line flares on kicks
 Onset Threshold  lower = catches more kicks
+Gif Scale        size of the crown gif (on crown_vis, Gif page)
+Gif X            left-right position of the gif
+Gif Y            how high the gif sits
 New music: drop files into Desktop\MUSIC_SUNO, then press Reload Tracks.
 
 
 VERSIONS IN THIS FOLDER
 -----------------------
-build_music_rack.py                     current: neon spectrum terrain
+add_gif.py                              current picture: crown line and lower gif
+build_music_rack.py                     neon spectrum terrain
+restore_picture.py                      puts the flat line back
 build_music_rack.v3_terrain.py          same terrain version (backup)
 build_music_rack.v2_cloud.py            older colour cloud version
 build_music_rack.before_visual_rework.py  original
