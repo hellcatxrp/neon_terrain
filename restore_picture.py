@@ -5,14 +5,16 @@
 #
 # 2026-11-10: also removes the Asset, Asset Key, and Reload Assets parameters
 #   from the Music page, deletes crown_vis/asset_callbacks and asset_table, and
-#   blanks the uGif* layout uniforms add_gif.py put on visual.
+#   blanks the uGif* layout uniforms add_gif.py put on visual. Gif Scale,
+#   Gif X, Gif Y leave the Music page; crown_vis keeps their last values.
 #
 # Textport:
 #   exec(open(r'C:\Users\James\Desktop\TOUCH\restore_picture.py', encoding='utf-8').read())
 
 RACK = '/project1/music_rack'
 BUILDER = r'C:\Users\James\Desktop\TOUCH\build_music_rack.py'
-ASSET_PARS = ('Asset', 'Assetkey', 'Reloadassets')
+ASSET_PARS = ('Asset', 'Assetkey', 'Reloadassets', 'Gifscale', 'Gifx', 'Gify')
+GIF_PARS = ('Gifscale', 'Gifx', 'Gify')
 ASSET_NODES = ('asset_callbacks', 'asset_table')
 
 UNIFORMS = (
@@ -154,6 +156,18 @@ def remove_asset_menu(rack):
     """Callbacks first, so removing the parameters triggers nothing."""
     removed = []
     base = rack.op('crown_vis')
+    # crown_vis's Gif sliders are bound to the Music page ones. Keep their
+    # current values as plain numbers before those go.
+    for name in GIF_PARS:
+        par = getattr(base.par, name, None) if base is not None else None
+        if par is None:
+            continue
+        try:
+            value = float(par.eval())
+            par.mode = ParMode.CONSTANT  # noqa: F821
+            par.val = value
+        except Exception as err:
+            print('restore: could not unlink crown_vis %s: %s' % (name, err))
     for name in ASSET_NODES:
         node = base.op(name) if base is not None else None
         if node is None:

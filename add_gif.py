@@ -17,6 +17,8 @@
 #   key is back as Key "classic"; "auto" measures the backdrop and de-fringes.
 #   Asset and Asset Key menus plus a Reload Assets pulse on the Music page pick
 #   the file in assets\. Gif Scale is the asset's longer side in 720p pixels.
+# 2026-11-10: Gif Scale, Gif X, Gif Y also on the Music page, bound both ways
+#   to the crown_vis sliders.
 # 2026-11-10: after a rerun renames gif_* to crown_*, point Pixel Shader at the
 #   renamed DATs again. The stale name was the red X, the olive picture, the
 #   huge crown, and the white rectangle.
@@ -1226,6 +1228,58 @@ def ensure_asset_pars(rack, current_file):
     return created
 
 
+GIF_PARS = (
+    ('Gifscale', 'Gif Scale', 320.0, 40.0, 640.0),
+    ('Gifx', 'Gif X', 0.5, 0.0, 1.0),
+    ('Gify', 'Gif Y', 0.02, 0.0, 0.40),
+)
+
+
+def ensure_rack_gif_pars(rack, base):
+    """Gif Scale, X, Y on the Music page too. New ones start at crown_vis's values."""
+    page = music_page(rack)
+    created = []
+    for name, label, default, lo, hi in GIF_PARS:
+        if hasattr(rack.par, name):
+            continue
+        current = par_value(getattr(base.par, name), default) if hasattr(base.par, name) else default
+        par = ensure_float(page, name, label, default, lo, hi)
+        par.val = current
+        created.append(name)
+    return created
+
+
+def link_gif_pars(rack, base):
+    """Bind crown_vis's sliders to the Music page ones. Both stay usable and in step.
+    crown_key keeps reading parent().par.Gifscale, so its wiring does not change."""
+    notes = []
+    for name, _label, _default, _lo, _hi in GIF_PARS:
+        mine = getattr(base.par, name, None)
+        theirs = getattr(rack.par, name, None)
+        if mine is None or theirs is None:
+            notes.append('%s missing' % name)
+            continue
+        link = 'parent().par.%s' % name
+        try:
+            if mine.mode == ParMode.BIND and mine.bindExpr == link:  # noqa: F821
+                continue
+            mine.bindExpr = link
+            mine.mode = ParMode.BIND  # noqa: F821
+            if abs(par_value(mine, -1.0) - par_value(theirs, -2.0)) < 1e-6:
+                notes.append('%s bound' % name)
+                continue
+        except Exception as err:
+            notes.append('%s bind failed (%s)' % (name, err))
+        # Older builds without binding: follow the Music page by expression.
+        try:
+            mine.expr = link
+            mine.mode = ParMode.EXPRESSION  # noqa: F821
+            notes.append('%s follows the Music page (expression)' % name)
+        except Exception as err:
+            notes.append('%s not linked (%s)' % (name, err))
+    return notes
+
+
 def ensure_asset_table(base):
     table = base.op('asset_table')
     if table is None:
@@ -1477,6 +1531,8 @@ def _install_gif():
     # Asset menus on the Music page. Values already chosen stay as they are.
     import os
     created_pars = ensure_asset_pars(rack, asset_file)
+    created_pars += ensure_rack_gif_pars(rack, base)
+    link_notes = link_gif_pars(rack, base)
     ensure_asset_table(base)
     tools['refresh_assets'](rack, base)
     asset_file = chosen_asset_file(rack, tools)
@@ -1644,6 +1700,8 @@ def _install_gif():
         print('gif: sizes unreadable: %s' % err)
     if created_pars:
         print('Added %s to the Music page of %s.' % (', '.join(created_pars), rack.path))
+    if link_notes:
+        print('Gif sliders: %s.' % ', '.join(link_notes))
     if movie_now is not None:
         seen = measured_backdrop(movie_now)
         print('Corner colour as delivered (0-255, RGBA): %s. In the file koth_crown.gif it is about 38 39 1.' % (

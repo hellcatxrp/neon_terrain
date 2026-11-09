@@ -212,7 +212,15 @@ def deep(rack, base, visual):
         for name in ('Gifscale', 'Gifx', 'Gify'):
             print('crown_vis', par_text(base, name))
     print('visual uniforms:', uniforms(visual))
-    for name in ('Asset', 'Assetkey', 'Titleanim'):
+    if base is not None:
+        for name in ('Gifscale', 'Gifx', 'Gify'):
+            par = getattr(base.par, name, None)
+            if par is not None:
+                try:
+                    print('crown_vis %s mode %s %s' % (name, par.mode, par.bindExpr or par.expr or ''))
+                except Exception as err:
+                    print('crown_vis %s mode unreadable: %s' % (name, err))
+    for name in ('Asset', 'Assetkey', 'Gifscale', 'Gifx', 'Gify', 'Titleanim'):
         print('music_rack', par_text(rack, name))
     print('')
     print('--- white rectangle: alpha where the title card has no glyphs (should be 0)')

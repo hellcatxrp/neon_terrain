@@ -1,6 +1,31 @@
 MUSIC VISUALISER - HOW TO RUN
 =============================
 
+QUICK START (every time)
+------------------------
+1. Open NewProject.toe in this folder. That is always the latest save.
+   Each Ctrl+S writes NewProject.toe plus an identical numbered copy
+   (NewProject.6.toe, .7, ...), and older numbered copies move to Backup\.
+   The title bar shows the numbered name. That is the same project.
+   Only open an older numbered file to go back to an earlier save.
+2. Open the Textport (Alt+T) and paste this line. It opens the picture in
+   its own window, ready to screen-share in Discord:
+
+   op('/project1/music_rack/preview').openViewer(unique=True, borders=True)
+
+3. Click music_rack, open the Music page, pick a Track, turn Play on.
+   Use Source "Voice channel" to follow the call instead (see VISUALISER below).
+4. In Discord, Share Screen, pick that window (not the whole screen).
+
+You do not need to run add_gif.py each time. The crown and the gif are saved
+in the .toe. Run it again only after changing the scripts, or if something
+broke (see RED X below). Press Ctrl+S after changes you want to keep.
+
+Different crown art: put a .gif, .png, .jpg, .mp4, or .mov in
+Desktop\TOUCH\assets, press Reload Assets on the Music page, pick it in Asset.
+See SWITCHING THE CROWN ASSET below for the Asset Key setting.
+
+
 EASIEST: after building once, save the project (Ctrl+S) into this folder.
 Next time just open that .toe file. Everything is already there.
 
@@ -112,19 +137,21 @@ and the textport prints "gif ERROR: ..." lines saying why.
 The last lines it prints include "crown_vis.errors(recurse=True): (none)".
 Anything else there is the reason for a red X (see RED X below).
 
-Gif Scale, Gif X, and Gif Y are on crown_vis, on the Gif page.
+Gif Scale, Gif X, and Gif Y are on the Music page and on crown_vis's Gif page.
 A larger Gif Scale brings the art up toward the line.
 
 To put the flat line back, paste:
 
 exec(open(r'C:\Users\James\Desktop\TOUCH\restore_picture.py', encoding='utf-8').read())
 
-That also removes Asset, Asset Key, and Reload Assets from the Music page.
+That also removes Asset, Asset Key, Reload Assets, and the Gif sliders from
+the Music page. crown_vis keeps the last Gif values.
 Paste the add_gif.py line again to bring the crown and those menus back.
 
 
-GIF SLIDERS (crown_vis, Gif page)
----------------------------------
+GIF SLIDERS (music_rack Music page, and crown_vis Gif page)
+-----------------------------------------------------------
+The same three sliders are on both pages and stay in step. Use either.
 Gif Scale  size of the asset's longer side, in pixels of the 1280x720 picture.
            koth_crown.gif is 320x320, so 320 shows it 1:1 and 640 is exactly 2x.
            Those two are the crispest with Asset Key "Olive (classic)".
@@ -168,9 +195,9 @@ SLIDERS (Music page)
 Motion           how fast the terrain scrolls with the music
 Kick Punch       how hard the front line flares on kicks
 Onset Threshold  lower = catches more kicks
-Gif Scale        size of the crown gif (on crown_vis, Gif page)
-Gif X            left-right position of the gif
-Gif Y            how high the gif sits
+Gif Scale        size of the crown art (also on crown_vis, Gif page)
+Gif X            left-right position of the art
+Gif Y            how high the art sits
 Asset            which file from Desktop\TOUCH\assets is the crown
 Asset Key        how its backdrop is removed (see SWITCHING THE CROWN ASSET)
 Reload Assets    re-reads the assets folder
