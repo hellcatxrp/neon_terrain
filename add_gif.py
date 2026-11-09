@@ -10,12 +10,25 @@
 #
 # Undo the crown and the gif (Play, the track, and Source stay):
 #   exec(open(r'C:\Users\James\Desktop\TOUCH\restore_picture.py', encoding='utf-8').read())
+#
+# 2026-11-10: sharper crown. crown_key renders at visual's resolution and
+#   crown_stack copies it and title_card texel for texel (no 50/50 split sized
+#   by the title card, which squeezed the gif into 161x272). The original olive
+#   key is back as Key "classic"; "auto" measures the backdrop and de-fringes.
+#   Asset and Asset Key menus plus a Reload Assets pulse on the Music page pick
+#   the file in assets\. Gif Scale is the asset's longer side in 720p pixels.
+# 2026-11-10: after a rerun renames gif_* to crown_*, point Pixel Shader at the
+#   renamed DATs again. The stale name was the red X, the olive picture, the
+#   huge crown, and the white rectangle.
 
 import re
 
-GIF = r'C:\Users\James\Desktop\TOUCH\assets\koth_crown.gif'
+ASSET_DIR = r'C:\Users\James\Desktop\TOUCH\assets'
+GIF = ASSET_DIR + r'\koth_crown.gif'
 RACK = '/project1/music_rack'
 REST_LIFT = 0.20
+# Uniforms on visual that describe crown_stack. restore_picture.py clears uGif*.
+LAYOUT_UNIFORMS = ('uGifKeyW', 'uGifKeyH', 'uGifCardW', 'uGifCardH')
 
 REST_RE = re.compile(r'const float REST_LIFT = [0-9.]+\s*;')
 TITLE_OLD = '''// Glyph coverage. Coordinates outside the card contribute nothing.
@@ -27,35 +40,74 @@ float titleGlyph(vec2 texUV)
 '''
 TITLE_NEW = '''// Glyph coverage. Coordinates outside the card contribute nothing.
 // GIF_TITLE begin
+// crown_stack layout, set by add_gif.py: crown_key fills the bottom rows and
+// title_card sits above it at the left. Both are copied texel for texel.
+// With these four at 0 the older half-and-half stack is read instead.
+uniform float uGifKeyW;
+uniform float uGifKeyH;
+uniform float uGifCardW;
+uniform float uGifCardH;
+
+bool gifStacked()
+{
+    return uGifKeyW >= 1.0 && uGifKeyH >= 1.0 && uGifCardW >= 1.0 && uGifCardH >= 1.0;
+}
+
+// title_card's own size, so the title keeps its aspect.
+ivec2 gifCardSize(ivec2 stackSize)
+{
+    if (gifStacked()) {
+        return ivec2(int(uGifCardW + 0.5), int(uGifCardH + 0.5));
+    }
+    return ivec2(stackSize.x, stackSize.y / 2);
+}
+
 float titleGlyph(vec2 texUV)
 {
     float inside = step(0.0, texUV.x) * step(texUV.x, 1.0) * step(0.0, texUV.y) * step(texUV.y, 1.0);
-    // Title card lives in the top half of crown_stack.
-    vec2 stacked = vec2(texUV.x, 0.5 + texUV.y * 0.5);
-    ivec2 titleSize = textureSize(sTD2DInputs[2], 0);
-    float seam = 0.5 / max(float(titleSize.y), 1.0);
-    stacked.y = max(stacked.y, 0.5 + seam);
-    return texture(sTD2DInputs[2], clamp(stacked, 0.0, 1.0)).a * inside;
+    vec2 stackSize = vec2(textureSize(sTD2DInputs[2], 0));
+    vec2 stacked;
+    if (gifStacked()) {
+        // The same texels as sampling title_card itself, clamped to its edge.
+        vec2 card = vec2(uGifCardW, uGifCardH);
+        vec2 px = clamp(texUV * card, vec2(0.5), card - 0.5);
+        stacked = (px + vec2(0.0, uGifKeyH)) / stackSize;
+    } else {
+        stacked = vec2(texUV.x, 0.5 + texUV.y * 0.5);
+        float seam = 0.5 / max(stackSize.y, 1.0);
+        stacked.y = max(stacked.y, 0.5 + seam);
+        stacked = clamp(stacked, 0.0, 1.0);
+    }
+    return texture(sTD2DInputs[2], stacked).a * inside;
 }
 // GIF_TITLE end
 '''
 SIZE_OLD = '    ivec2 size = textureSize(sTD2DInputs[2], 0);\n'
-SIZE_NEW = (
-    '    ivec2 size = textureSize(sTD2DInputs[2], 0);\n'
-    '    size.y /= 2; // top half of crown_stack is the title card\n'
-)
+SIZE_MARK = 'size = gifCardSize(size);'
+SIZE_LINE = '    size = gifCardSize(size); // title_card inside crown_stack\n'
+SIZE_NEW = SIZE_OLD + SIZE_LINE
+# Written by the half-and-half version. Replaced by SIZE_LINE on the next run.
+SIZE_LEGACY = '    size.y /= 2; // top half of crown_stack is the title card\n'
 GRAIN = '    col += grain * 0.018;\n'
 GIF_BEGIN = '// GIF_UNDER begin'
 GIF_END = '// GIF_UNDER end'
 GIF_BLOCK = '''    col += grain * 0.018;
     // GIF_UNDER begin
-    // Keyed crown is the bottom half of input 2. It shows only in dark pixels.
+    // Keyed crown from the bottom rows of input 2. It shows only in dark pixels.
     {
-        vec2 gifUV = vec2(vUV.x, vUV.y * 0.5);
         ivec2 stackSize = textureSize(sTD2DInputs[2], 0);
-        float gifSeam = 0.5 / max(float(stackSize.y), 1.0);
-        gifUV.y = min(gifUV.y, 0.5 - gifSeam);
-        vec4 gifPix = texture(sTD2DInputs[2], gifUV);
+        vec4 gifPix;
+        if (gifStacked()) {
+            // crown_key matches this frame: fetch the one texel under this pixel, 1:1.
+            vec2 keySize = vec2(uGifKeyW, uGifKeyH);
+            ivec2 px = ivec2(clamp(floor(vUV.st * keySize), vec2(0.0), keySize - 1.0));
+            gifPix = texelFetch(sTD2DInputs[2], px, 0);
+        } else {
+            vec2 gifUV = vec2(vUV.x, vUV.y * 0.5);
+            float gifSeam = 0.5 / max(float(stackSize.y), 1.0);
+            gifUV.y = min(gifUV.y, 0.5 - gifSeam);
+            gifPix = texture(sTD2DInputs[2], gifUV);
+        }
         float gifLuma = max(col.r, max(col.g, col.b));
         float gifUnder = 1.0 - smoothstep(0.05, 0.18, gifLuma);
         col = mix(col, gifPix.rgb, clamp(gifPix.a * gifUnder, 0.0, 1.0));
@@ -64,23 +116,74 @@ GIF_BLOCK = '''    col += grain * 0.018;
 '''
 
 KEY_SHADER = r'''layout(location = 0) out vec4 fragColor;
-uniform float uGifScale;
-uniform float uGifX;
-uniform float uGifY;
+uniform float uGifScale;  // longer side of the asset, in pixels of a 1280x720 frame
+uniform float uGifX;      // centre of the asset, 0..1 across the frame
+uniform float uGifY;      // bottom edge of the asset, 0..1 up the frame
+uniform float uKeyMode;   // 0 classic olive, 1 auto (measured backdrop), 2 none (asset alpha)
 
-// Place the gif in the 1280x720 frame and drop the flat olive field.
-// The vivid term still keeps the crystal if the file is read as linear.
-void main()
+// Gif Scale is counted in a 1280x720 frame whatever this TOP's size is.
+// This TOP matches visual, and crown_stack and visual copy it 1:1.
+const vec2 FRAME = vec2(1280.0, 720.0);
+// Auto key: colour distance from the measured backdrop where alpha ramps 0 to 1.
+const float KEY_LO = 0.08;
+const float KEY_HI = 0.16;
+
+vec3 gBg = vec3(0.0);
+int gMode = 0;
+
+// Four texels just inside the corners: the backdrop as the Movie File In
+// actually delivers it, rather than the value written in the file.
+vec3 measuredBackdrop(ivec2 size)
 {
-    vec2 frame = vec2(1280.0, 720.0);
-    float sideX = uGifScale / frame.x;
-    float sideY = uGifScale / frame.y;
-    float left = uGifX - sideX * 0.5;
-    vec2 local = vec2(
-        (vUV.x - left) / max(sideX, 1e-4),
-        (vUV.y - uGifY) / max(sideY, 1e-4));
-    float inside = step(0.0, local.x) * step(local.x, 1.0)
-        * step(0.0, local.y) * step(local.y, 1.0);
+    ivec2 m = min(ivec2(2), max(size - 1, ivec2(0)));
+    ivec2 far = max(size - 1 - m, ivec2(0));
+    vec3 c = texelFetch(sTD2DInputs[0], ivec2(m.x, m.y), 0).rgb
+        + texelFetch(sTD2DInputs[0], ivec2(far.x, m.y), 0).rgb
+        + texelFetch(sTD2DInputs[0], ivec2(m.x, far.y), 0).rgb
+        + texelFetch(sTD2DInputs[0], ivec2(far.x, far.y), 0).rgb;
+    return c * 0.25;
+}
+
+// One source texel, keyed, premultiplied.
+vec4 keyedTexel(ivec2 t)
+{
+    vec4 c = texelFetch(sTD2DInputs[0], t, 0);
+    if (gMode == 2) {
+        return c;   // the asset's own alpha. Movie File In hands it over premultiplied.
+    }
+    vec3 diff = c.rgb - gBg;
+    float a = smoothstep(KEY_LO, KEY_HI, length(diff));
+    // Smallest coverage that keeps the unmixed colour inside 0..1. Part-covered
+    // edge texels lose the backdrop instead of keeping an olive rim.
+    vec3 up = max(diff, 0.0) / max(1.0 - gBg, vec3(1e-3));
+    vec3 dn = max(-diff, 0.0) / max(gBg, vec3(0.12));
+    float cover = max(max(max(up.r, up.g), max(up.b, max(dn.r, max(dn.g, dn.b)))), a);
+    vec3 fg = clamp(gBg + diff / max(cover, 0.04), 0.0, 1.0);
+    return vec4(fg * a, a);
+}
+
+// Sharp bilinear: each texel is a flat square, blended only across the last
+// output pixel at its edge. Crisp at any Gif Scale, without stair steps.
+vec4 sharpSample(vec2 uv, vec2 src, vec2 pxPerTexel)
+{
+    vec2 x = uv * src - 0.5;
+    vec2 i = floor(x);
+    vec2 f = x - i;
+    vec2 k = max(pxPerTexel, vec2(1.0));
+    f = clamp((f - 0.5) * k + 0.5, 0.0, 1.0);
+    ivec2 hi = ivec2(src) - 1;
+    ivec2 i0 = clamp(ivec2(i), ivec2(0), hi);
+    ivec2 i1 = clamp(ivec2(i) + 1, ivec2(0), hi);
+    vec4 a = keyedTexel(i0);
+    vec4 b = keyedTexel(ivec2(i1.x, i0.y));
+    vec4 c = keyedTexel(ivec2(i0.x, i1.y));
+    vec4 d = keyedTexel(i1);
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// The original key, unchanged: fixed olive, luma and chroma gates, one linear sample.
+vec4 classicKey(vec2 local, float inside)
+{
     vec4 s = texture(sTD2DInputs[0], clamp(local, 0.0, 1.0));
     vec3 olive = vec3(39.0, 40.0, 2.0) / 255.0;
     float d = distance(s.rgb, olive);
@@ -89,27 +192,263 @@ void main()
     float near = smoothstep(0.10, 0.18, d) * smoothstep(0.10, 0.22, luma);
     float vivid = smoothstep(0.22, 0.42, luma) * smoothstep(0.18, 0.36, chroma);
     float a = max(near, vivid) * inside;
-    fragColor = TDOutputSwizzle(vec4(s.rgb, a));
+    return vec4(s.rgb, a);
+}
+
+// Place the asset in the frame at its real aspect and key it. Straight alpha out.
+void main()
+{
+    ivec2 srcI = max(textureSize(sTD2DInputs[0], 0), ivec2(1));
+    vec2 src = vec2(srcI);
+    float side = uGifScale / max(src.x, src.y);
+    vec2 sizeUV = src * side / FRAME;
+    vec2 origin = vec2(uGifX - sizeUV.x * 0.5, uGifY);
+    vec2 local = (vUV.st - origin) / max(sizeUV, vec2(1e-4));
+    float inside = step(0.0, local.x) * step(local.x, 1.0)
+        * step(0.0, local.y) * step(local.y, 1.0);
+    gMode = int(uKeyMode + 0.5);
+    if (gMode <= 0) {
+        fragColor = TDOutputSwizzle(classicKey(local, inside));
+        return;
+    }
+    if (inside < 0.5) {
+        fragColor = TDOutputSwizzle(vec4(0.0));
+        return;
+    }
+    gBg = measuredBackdrop(srcI);
+    // Output pixels per source texel. Below 1 the asset is shrunk, so average
+    // up to 4x4 samples per pixel instead of skipping texels.
+    vec2 outRes = uTDOutputInfo.res.zw;
+    vec2 pxPerTexel = sizeUV * outRes / src;
+    ivec2 n = ivec2(clamp(ceil(1.0 / max(pxPerTexel, vec2(1e-3))), vec2(1.0), vec2(4.0)));
+    vec2 pixel = 1.0 / max(sizeUV * outRes, vec2(1e-3));
+    vec4 acc = vec4(0.0);
+    for (int j = 0; j < n.y; j++) {
+        for (int i = 0; i < n.x; i++) {
+            vec2 off = (vec2(float(i), float(j)) + 0.5) / vec2(n) - 0.5;
+            acc += sharpSample(clamp(local + off * pixel, 0.0, 1.0), src, pxPerTexel);
+        }
+    }
+    acc /= float(n.x * n.y);
+    vec3 rgb = acc.a > 1e-4 ? acc.rgb / acc.a : vec3(0.0);
+    fragColor = TDOutputSwizzle(vec4(clamp(rgb, 0.0, 1.0), clamp(acc.a, 0.0, 1.0)));
 }
 '''
 
 STACK_SHADER = r'''layout(location = 0) out vec4 fragColor;
 
-// Input 0 is the placed gif. Input 1 is title_card.
-// Both are sampled on every pixel. Bottom half is the gif, top half the title.
+// Input 0 is crown_key, input 1 is title_card. Both are copied texel for texel:
+// crown_key fills the bottom rows, title_card sits above it at the left.
+// Nothing is scaled, so neither picture is resampled here.
 void main()
 {
-    vec4 gif = texture(sTD2DInputs[0], vec2(vUV.x, clamp(vUV.y * 2.0, 0.0, 1.0)));
-    vec4 title = texture(sTD2DInputs[1], vec2(vUV.x, clamp((vUV.y - 0.5) * 2.0, 0.0, 1.0)));
-    float top = step(0.5, vUV.y);
-    fragColor = TDOutputSwizzle(mix(gif, title, top));
+    ivec2 p = ivec2(gl_FragCoord.xy);
+    ivec2 keySize = textureSize(sTD2DInputs[0], 0);
+    ivec2 cardSize = textureSize(sTD2DInputs[1], 0);
+    vec4 c = vec4(0.0);
+    if (p.y < keySize.y) {
+        if (p.x < keySize.x) {
+            c = texelFetch(sTD2DInputs[0], p, 0);
+        }
+    } else {
+        ivec2 q = ivec2(p.x, p.y - keySize.y);
+        if (q.x < cardSize.x && q.y < cardSize.y) {
+            c = texelFetch(sTD2DInputs[1], q, 0);
+        }
+    }
+    fragColor = TDOutputSwizzle(c);
 }
+'''
+
+KEY_MODES = ('classic', 'auto', 'none')
+KEY_LABELS = ('Olive (classic)', 'Olive (auto, de-fringed)', 'None (asset alpha)')
+ASSET_PARS = ('Asset', 'Assetkey', 'Reloadassets')
+
+# Parameter Execute DAT text for crown_vis/asset_callbacks. add_gif.py also
+# runs it in its own namespace to share the folder and key functions.
+ASSET_CALLBACKS = r'''# Written by add_gif.py. Watches Asset, Asset Key, Reload Assets, and
+# Reload Tracks on music_rack. Repoints crown_movie without rebuilding.
+import os
+
+ASSET_DIR = r'C:\Users\James\Desktop\TOUCH\assets'
+ASSET_EXT = ('.gif', '.png', '.jpg', '.jpeg', '.mp4', '.mov')
+DEFAULT_ASSET = 'koth_crown.gif'
+KEY_MODES = ('classic', 'auto', 'none')
+_busy = {'on': False}
+
+
+def asset_rows(folder=None):
+    folder = folder or ASSET_DIR
+    rows = []
+    try:
+        names = os.listdir(folder)
+    except OSError as err:
+        print('assets: cannot read %s: %s' % (folder, err))
+        return rows
+    for name in names:
+        full = os.path.join(folder, name)
+        if os.path.isfile(full) and os.path.splitext(name)[1].lower() in ASSET_EXT:
+            rows.append((name, full))
+    rows.sort(key=lambda pair: pair[0].casefold())
+    return rows
+
+
+def default_key(name):
+    # A PNG usually carries its own alpha. Everything else is taken to sit on olive.
+    return 'none' if name.lower().endswith('.png') else 'classic'
+
+
+def _table(base):
+    return base.op('asset_table') if base is not None else None
+
+
+def stored_keys(base):
+    keys = {}
+    table = _table(base)
+    if table is None:
+        return keys
+    for r in range(table.numRows):
+        if table.numCols > 2 and str(table[r, 2].val) in KEY_MODES:
+            keys[str(table[r, 0].val)] = str(table[r, 2].val)
+    return keys
+
+
+def asset_name(rack):
+    return str(rack.par.Asset.eval() or '') if hasattr(rack.par, 'Asset') else ''
+
+
+def asset_path(rack, base):
+    name = asset_name(rack)
+    if not name:
+        return ''
+    full = os.path.join(ASSET_DIR, name)
+    return full if os.path.isfile(full) else ''
+
+
+def refresh_assets(rack, base):
+    """Rebuild the Asset menu from the folder. Keeps the pick and each asset's key."""
+    if not hasattr(rack.par, 'Asset'):
+        return []
+    rows = asset_rows()
+    keys = stored_keys(base)
+    table = _table(base)
+    if table is not None:
+        table.clear()
+        for name, full in rows:
+            table.appendRow([name, full.replace('\\', '/'), keys.get(name, default_key(name))])
+    par = rack.par.Asset
+    current = asset_name(rack)
+    names = [name for name, _full in rows]
+    if names:
+        par.menuNames = names
+        par.menuLabels = names
+    else:
+        par.menuNames = [current or DEFAULT_ASSET]
+        par.menuLabels = ['(no assets in %s)' % ASSET_DIR]
+    if names and current not in names:
+        pick = DEFAULT_ASSET if DEFAULT_ASSET in names else names[0]
+        _busy['on'] = True
+        try:
+            par.val = pick
+        finally:
+            _busy['on'] = False
+        print('assets: %s is gone from the folder. Asset is now %s.' % (current or '(blank)', pick))
+    return rows
+
+
+def set_uniform(node, name, value):
+    i = 0
+    while node is not None and hasattr(node.par, 'vec%dname' % i) and i < 64:
+        if str(getattr(node.par, 'vec%dname' % i) or '') == name:
+            getattr(node.par, 'vec%dvaluex' % i).expr = repr(float(value))
+            return True
+        i += 1
+    return False
+
+
+def key_index(rack):
+    value = str(rack.par.Assetkey.eval() or '') if hasattr(rack.par, 'Assetkey') else ''
+    return KEY_MODES.index(value) if value in KEY_MODES else 0
+
+
+def apply_key(rack, base, remember=True):
+    index = key_index(rack)
+    key = base.op('crown_key') if base is not None else None
+    if key is not None and not set_uniform(key, 'uKeyMode', index):
+        print('assets: crown_key has no uKeyMode uniform. Run add_gif.py again.')
+    table = _table(base)
+    if remember and table is not None:
+        name = asset_name(rack)
+        for r in range(table.numRows):
+            if str(table[r, 0].val) == name and table.numCols > 2:
+                table[r, 2] = KEY_MODES[index]
+    return index
+
+
+def apply_asset(rack, base, force=False):
+    """Point crown_movie at the chosen file. Its remembered key comes with it."""
+    path = asset_path(rack, base)
+    if not path:
+        print('assets: %s is not in %s.' % (asset_name(rack) or '(blank)', ASSET_DIR))
+        return ''
+    name = asset_name(rack)
+    key = stored_keys(base).get(name, default_key(name))
+    if hasattr(rack.par, 'Assetkey') and str(rack.par.Assetkey.eval()) != key:
+        _busy['on'] = True
+        try:
+            rack.par.Assetkey = key
+        finally:
+            _busy['on'] = False
+    apply_key(rack, base, remember=False)
+    movie = base.op('crown_movie') if base is not None else None
+    if movie is None:
+        return path
+    current = str(movie.par.file.eval() or '').replace('\\', '/').lower()
+    if force or current != path.replace('\\', '/').lower():
+        movie.par.file = path
+        if hasattr(movie.par, 'reloadpulse'):
+            movie.par.reloadpulse.pulse()
+        print('assets: crown_movie plays %s, key %s.' % (path, key))
+    return path
+
+
+def onValueChange(par, prev):
+    if _busy['on']:
+        return
+    if par.name == 'Asset':
+        apply_asset(par.owner, me.parent())
+    elif par.name == 'Assetkey':
+        apply_key(par.owner, me.parent())
+    return
+
+
+def onValuesChanged(changes):
+    for change in changes:
+        onValueChange(change.par, getattr(change, 'prev', None))
+    return
+
+
+def onPulse(par):
+    if par.name in ('Reloadassets', 'Reloadtracks'):
+        refresh_assets(par.owner, me.parent())
+        apply_asset(par.owner, me.parent())
+    return
+
+
+def onExpressionChange(par, prev):
+    return
+
+
+def onExportChange(par, prev):
+    return
 '''
 
 OWNED = (
     'crown_over', 'crown_stack', 'crown_key', 'crown_movie',
     'crown_over_shader', 'crown_stack_shader', 'crown_key_shader',
 )
+# Kept across runs: the Select and Out TOPs, and the asset menu state.
+KEPT = ('crown_title_in', 'crown_out', 'asset_callbacks', 'asset_table')
 # Used only while a live crown_stack is still feeding visual.
 TEMP_NAMES = (
     'gif_movie', 'gif_key', 'gif_stack', 'gif_key_shader', 'gif_stack_shader',
@@ -150,8 +489,10 @@ def patch_gif(text):
         reasons.append('titleGlyph is not the terrain function')
     if text.count(SIZE_OLD) != 1:
         reasons.append('title size line count: %s' % text.count(SIZE_OLD))
-    if 'size.y /= 2;' in text and text.count('size.y /= 2;') != 1:
+    if 'size.y /= 2;' in text and text.count(SIZE_LEGACY) != 1:
         reasons.append('title half-height count is wrong')
+    if text.count(SIZE_MARK) > 1:
+        reasons.append('title card size line count: %s' % text.count(SIZE_MARK))
     gif_marked = GIF_BEGIN in text
     if gif_marked and (text.count(GIF_BEGIN) != 1 or text.count(GIF_END) != 1):
         reasons.append('GIF_UNDER markers are uneven')
@@ -174,11 +515,14 @@ def patch_gif(text):
             return None, ['GIF_TITLE markers could not be updated']
         text = updated
         notes.append('title kept')
-    if 'size.y /= 2;' not in text:
+    if SIZE_MARK in text:
+        notes.append('title size kept')
+    elif SIZE_LEGACY in text:
+        text = text.replace(SIZE_LEGACY, SIZE_LINE, 1)
+        notes.append('title size from half stack')
+    else:
         text = text.replace(SIZE_OLD, SIZE_NEW, 1)
         notes.append('title size')
-    else:
-        notes.append('title size kept')
     if gif_marked:
         gif_span = GIF_BLOCK[GIF_BLOCK.find(GIF_BEGIN):]
         updated = replace_span(text, GIF_BEGIN, GIF_END, gif_span)
@@ -191,7 +535,7 @@ def patch_gif(text):
         notes.append('gif')
     if REST_RE.findall(text) != ['const float REST_LIFT = %.2f;' % REST_LIFT]:
         return None, ['REST_LIFT did not land on %.2f' % REST_LIFT]
-    if text.count(GIF_BEGIN) != 1 or text.count('size.y /= 2;') != 1:
+    if text.count(GIF_BEGIN) != 1 or text.count(SIZE_NEW) != 1 or 'size.y /= 2;' in text:
         return None, ['patch did not land once']
     if 'sTD2DInputs[3]' in text:
         return None, ['patch sampled a fourth input']
@@ -653,13 +997,18 @@ def finish_glsl(node, dat):
     return problems
 
 
-def build_layer(base, title, names, scale_par, x_par, y_par):
-    """Movie, olive key, and the two-half stack. Names must be free."""
+def build_layer(base, title, names, scale_par, x_par, y_par, asset_file, key_mode, key_res):
+    """Movie, key, and the texel-for-texel stack. Names must be free.
+
+    key_res is visual's size, so visual reads crown_key 1:1. The stack is
+    key height plus title_card height, so neither half is squeezed.
+    """
     movie_n, key_n, stack_n, key_dat_n, stack_dat_n = names
+    key_w, key_h = key_res
     movie = place(base.create(moviefileinTOP, movie_n), 0, 200)
     movie.viewer = False
     movie.display = False
-    movie.par.file = GIF
+    movie.par.file = asset_file
     if hasattr(movie.par, 'playmode'):
         choose(movie.par.playmode, 'sequential')
     if hasattr(movie.par, 'play'):
@@ -677,10 +1026,11 @@ def build_layer(base, title, names, scale_par, x_par, y_par):
     key.viewer = False
     key.display = False
     arm_glsl(key, version)
-    set_top_res(key, 1280, 720)
+    set_top_res(key, key_w, key_h)
     if hasattr(key.par, 'format'):
         choose(key.par.format, 'rgba8fixed')
     if hasattr(key.par, 'inputfiltertype'):
+        # The classic key samples with texture(). The other keys use texelFetch.
         choose(key.par.inputfiltertype, 'linear')
     if not wire(key, movie, 0):
         return movie, key, None, ['%s has no movie input' % key.path]
@@ -690,11 +1040,16 @@ def build_layer(base, title, names, scale_par, x_par, y_par):
         ('uGifScale', 'parent().par.Gifscale'),
         ('uGifX', 'parent().par.Gifx'),
         ('uGifY', 'parent().par.Gify'),
+        ('uKeyMode', repr(float(key_mode))),
     ]):
         key_dat.text = KEY_SHADER.replace(
-            'uniform float uGifScale;\nuniform float uGifX;\nuniform float uGifY;\n',
-            'const float uGifScale = %.1f;\nconst float uGifX = %.3f;\nconst float uGifY = %.3f;\n' % (
-                par_value(scale_par, 210.0), par_value(x_par, 0.5), par_value(y_par, 0.02)),
+            'uniform float uGifScale;', 'const float uGifScale = %.1f;' % par_value(scale_par, 320.0), 1,
+        ).replace(
+            'uniform float uGifX;', 'const float uGifX = %.3f;' % par_value(x_par, 0.5), 1,
+        ).replace(
+            'uniform float uGifY;', 'const float uGifY = %.3f;' % par_value(y_par, 0.02), 1,
+        ).replace(
+            'uniform float uKeyMode;', 'const float uKeyMode = %.1f;' % float(key_mode), 1,
         )
         print('gif: sliders are not wired. Using the values printed below as constants.')
 
@@ -708,16 +1063,19 @@ def build_layer(base, title, names, scale_par, x_par, y_par):
     stack.viewer = False
     stack.display = False
     arm_glsl(stack, version)
-    set_top_res(stack, 2048, 512)
+    set_top_res(stack, key_w, key_h + 272)
+    # crown_key keeps its own size. Only the title rows follow title_card.
+    # Constants for the key, because gif_key is renamed crown_key later.
     try:
-        stack.par.resolutionw.expr = "int(op('%s/title_card').par.resolutionw)" % RACK
-        stack.par.resolutionh.expr = "int(op('%s/title_card').par.resolutionh) * 2" % RACK
+        stack.par.resolutionw.expr = "max(%d, int(op('%s/title_card').par.resolutionw))" % (key_w, RACK)
+        stack.par.resolutionh.expr = "%d + int(op('%s/title_card').par.resolutionh)" % (key_h, RACK)
     except Exception as err:
         print('gif: stack size will not follow the title card: %s' % err)
+        return movie, key, stack, ['%s size expressions: %s' % (stack.path, err)]
     if hasattr(stack.par, 'format'):
         choose(stack.par.format, 'rgba8fixed')
     if hasattr(stack.par, 'inputfiltertype'):
-        choose(stack.par.inputfiltertype, 'linear')
+        choose(stack.par.inputfiltertype, 'nearest', 'linear')
     inlet = bring_title(base, title)
     if inlet is None:
         return movie, key, stack, ['title card could not enter crown_vis']
@@ -740,6 +1098,17 @@ def build_layer(base, title, names, scale_par, x_par, y_par):
             problems.append('%s loaded at %sx%s' % (movie.path, movie.width, movie.height))
     except Exception as err:
         problems.append('movie size: %s' % err)
+    # visual finds the title rows by these sizes, so they must hold exactly.
+    try:
+        want_w = max(key_w, int(title.par.resolutionw))
+        want_h = key_h + int(title.par.resolutionh)
+        if (int(key.width), int(key.height)) != (key_w, key_h):
+            problems.append('%s is %sx%s, wanted %sx%s' % (key.path, key.width, key.height, key_w, key_h))
+        if (int(stack.width), int(stack.height)) != (want_w, want_h):
+            problems.append('%s is %sx%s, wanted %sx%s' % (
+                stack.path, stack.width, stack.height, want_w, want_h))
+    except Exception as err:
+        problems.append('layer size check: %s' % err)
     return movie, key, stack, problems
 
 
@@ -747,6 +1116,26 @@ def rename_to(node, name):
     if node is None or node.name == name:
         return
     node.name = name
+
+
+def relink_shaders(base):
+    """Renaming a DAT does not update a GLSL TOP's Pixel Shader parameter.
+    Without this, crown_key and crown_stack lose their shader, error (red X),
+    and pass the raw olive gif straight through to visual."""
+    problems = []
+    for top_name, dat_name in (('crown_key', 'crown_key_shader'), ('crown_stack', 'crown_stack_shader')):
+        node = base.op(top_name)
+        dat = base.op(dat_name)
+        if node is None or dat is None:
+            problems.append('%s or %s is missing after the rename' % (top_name, dat_name))
+            continue
+        try:
+            node.par.pixeldat = dat
+        except Exception as err:
+            problems.append('%s pixeldat: %s' % (node.path, err))
+            continue
+        problems.extend(cook_errors(node))
+    return problems
 
 
 def crown_patcher():
@@ -782,7 +1171,218 @@ def cook_errors(node):
     return problems
 
 
+def asset_tools():
+    """The callback DAT's functions, run here in a separate namespace."""
+    ns = {}
+    exec(ASSET_CALLBACKS, ns)
+    return ns
+
+
+def music_page(rack):
+    for existing in rack.customPages:
+        if existing.name == 'Music':
+            return existing
+    return rack.appendCustomPage('Music')
+
+
+def chosen_asset_file(rack, tools):
+    """The Asset menu's file if it exists, else koth_crown.gif, else the first asset."""
+    import os
+    name = tools['asset_name'](rack)
+    if name and os.path.isfile(os.path.join(ASSET_DIR, name)):
+        return os.path.join(ASSET_DIR, name)
+    if os.path.isfile(GIF):
+        return GIF
+    rows = tools['asset_rows']()
+    return rows[0][1] if rows else ''
+
+
+def ensure_asset_pars(rack, current_file):
+    """Asset, Asset Key, Reload Assets at the end of the Music page. Values already set stay."""
+    import os
+    page = music_page(rack)
+    created = []
+    if not hasattr(rack.par, 'Asset'):
+        par = as_par(page.appendMenu('Asset', label='Asset'))
+        name = os.path.basename(current_file or GIF)
+        par.menuNames = [name]
+        par.menuLabels = [name]
+        par.default = name
+        par.val = name
+        created.append('Asset')
+    if not hasattr(rack.par, 'Assetkey'):
+        par = as_par(page.appendMenu('Assetkey', label='Asset Key'))
+        par.menuNames = list(KEY_MODES)
+        par.menuLabels = list(KEY_LABELS)
+        par.default = 'classic'
+        par.val = 'classic'
+        created.append('Assetkey')
+    else:
+        rack.par.Assetkey.menuNames = list(KEY_MODES)
+        rack.par.Assetkey.menuLabels = list(KEY_LABELS)
+    if not hasattr(rack.par, 'Reloadassets'):
+        as_par(page.appendPulse('Reloadassets', label='Reload Assets'))
+        created.append('Reloadassets')
+    return created
+
+
+def ensure_asset_table(base):
+    table = base.op('asset_table')
+    if table is None:
+        table = place(base.create(tableDAT, 'asset_table'), 0, -200)
+        table.viewer = False
+    return table
+
+
+def set_callbacks_active(base, active):
+    dat = base.op('asset_callbacks') if base is not None else None
+    if dat is not None and hasattr(dat.par, 'active'):
+        try:
+            dat.par.active = active
+        except Exception as err:
+            print('gif: asset callbacks active=%s: %s' % (active, err))
+
+
+def ensure_asset_callbacks(rack, base):
+    """Parameter Execute DAT in crown_vis, watching the asset pulses and menus on music_rack."""
+    dat = base.op('asset_callbacks')
+    if dat is None:
+        kind = None
+        for name in ('parameterexecuteDAT', 'parexecDAT', 'parexecuteDAT'):
+            try:
+                kind = eval(name)
+                break
+            except NameError:
+                continue
+        if kind is None:
+            print('gif: no Parameter Execute DAT type. Asset menus will not react until fixed.')
+            return None
+        dat = place(base.create(kind, 'asset_callbacks'), 280, -200)
+    dat.text = ASSET_CALLBACKS
+    try:
+        dat.par.op = rack
+    except Exception:
+        dat.par.op = rack.path
+    for name, value in (('pars', 'Asset Assetkey Reloadassets Reloadtracks'),
+                        ('custom', True), ('builtin', False), ('valuechange', True),
+                        ('onpulse', True), ('valueschanged', False)):
+        if hasattr(dat.par, name):
+            setattr(dat.par, name, value)
+    if hasattr(dat.par, 'active'):
+        dat.par.active = True
+    return dat
+
+
+def key_resolution(visual):
+    try:
+        width, height = int(visual.width), int(visual.height)
+    except Exception:
+        width, height = 0, 0
+    if width < 16 or height < 16:
+        width, height = 1280, 720
+    return width, height
+
+
+def uniform_names(node):
+    rows, _seq = vec_rows(node)
+    return set(name for _i, name in rows if name)
+
+
+def unbind_named(node, names):
+    """Blank uniform slots this run added, so a rollback leaves visual as it was."""
+    rows, _seq = vec_rows(node)
+    for i, name in rows:
+        if name not in names:
+            continue
+        try:
+            setattr(node.par, 'vec%dname' % i, '')
+            value = getattr(node.par, 'vec%dvaluex' % i)
+            value.expr = ''
+            value.mode = ParMode.CONSTANT  # noqa: F821
+            value.val = 0
+        except Exception as err:
+            print('gif: could not clear %s on %s: %s' % (name, node.path, err))
+
+
+def measured_backdrop(movie):
+    """Corner colour of the asset as TouchDesigner delivers it, 0-255."""
+    found = []
+    for u, v in ((0.01, 0.01), (0.99, 0.01), (0.01, 0.99), (0.99, 0.99)):
+        try:
+            color = sample_color(movie, u, v)
+            found.append([float(color[i]) for i in range(4)])
+        except Exception:
+            return None
+    return [round(sum(c[i] for c in found) / len(found) * 255.0, 1) for i in range(4)]
+
+
+def check_title_margin(title):
+    """The banner draws wherever title_card's alpha is above 0. Its margin must be clear."""
+    try:
+        corner = sample_color(title, 0.01, 0.01)
+        alpha = float(corner[3])
+    except Exception as err:
+        return 'title_card margin unreadable: %s' % err
+    if alpha <= 0.02:
+        return 'title_card margin alpha %.2f (clear)' % alpha
+    note = 'title_card margin alpha %.2f: the title would cross the sky as a solid rectangle' % alpha
+    if hasattr(title.par, 'bgalpha'):
+        try:
+            before = float(title.par.bgalpha.eval())
+            if before > 0.0:
+                title.par.bgalpha = 0
+                title.cook(force=True)
+                after = float(sample_color(title, 0.01, 0.01)[3])
+                note += '. bgalpha was %.2f, set to 0, margin alpha now %.2f' % (before, after)
+        except Exception as err:
+            note += '. bgalpha: %s' % err
+    return note
+
+
+def crown_vis_report(base):
+    """Errors anywhere inside crown_vis, and operators no script here creates."""
+    lines = []
+    try:
+        found = base.errors(recurse=True)
+    except TypeError:
+        found = base.errors()
+    except Exception as err:
+        found = 'errors() failed: %s' % err
+    lines.append('crown_vis.errors(recurse=True): %s' % (found or '(none)'))
+    known = set(OWNED) | set(TEMP_NAMES) | set(KEPT)
+    for child in base.children:
+        if child.name in known:
+            continue
+        try:
+            dock = child.dock
+        except Exception:
+            dock = None
+        if dock is not None and dock.name in known:
+            continue
+        try:
+            errs = str(child.errors() or '')
+        except Exception as err:
+            errs = 'errors() failed: %s' % err
+        lines.append('not made by add_gif.py: %s %s%s' % (
+            child.path, child.OPType, ('  ERRORS %s' % errs) if errs else ''))
+        lines.append("  remove it with: op('%s').destroy()" % child.path)
+    return lines
+
+
 def install_gif():
+    rack = op(RACK)
+    base = rack.op('crown_vis') if rack is not None else None
+    set_callbacks_active(base, False)
+    try:
+        _install_gif()
+    finally:
+        rack = op(RACK)
+        base = rack.op('crown_vis') if rack is not None else None
+        if base is not None and hasattr(rack.par, 'Asset'):
+            ensure_asset_callbacks(rack, base)
+
+
+def _install_gif():
     rack = op(RACK)
     if rack is None:
         print('gif: %s is missing. Nothing was changed.' % RACK)
@@ -841,13 +1441,10 @@ def install_gif():
         print('gif: visual input 2 is %s' % (src2.path if src2 else '(none)'))
         return
 
-    try:
-        import os
-        gif_ok = os.path.isfile(GIF)
-    except Exception:
-        gif_ok = False
-    if not gif_ok:
-        print('gif: missing %s. Nothing was changed.' % GIF)
+    tools = asset_tools()
+    asset_file = chosen_asset_file(rack, tools)
+    if not asset_file:
+        print('gif: no gif, png, jpg, mp4, or mov in %s. Nothing was changed.' % ASSET_DIR)
         return
 
     before = norm(shader.text)
@@ -871,9 +1468,24 @@ def install_gif():
             break
     if page is None:
         page = base.appendCustomPage('Gif')
-    scale_par = ensure_float(page, 'Gifscale', 'Gif Scale', 210.0, 40.0, 640.0)
+    # Gif Scale: the asset's longer side in pixels of a 1280x720 frame.
+    # 320 is 1:1 for koth_crown.gif and 640 is exactly 2x.
+    scale_par = ensure_float(page, 'Gifscale', 'Gif Scale', 320.0, 40.0, 640.0)
     x_par = ensure_float(page, 'Gifx', 'Gif X', 0.5, 0.0, 1.0)
     y_par = ensure_float(page, 'Gify', 'Gif Y', 0.02, 0.0, 0.40)
+
+    # Asset menus on the Music page. Values already chosen stay as they are.
+    import os
+    created_pars = ensure_asset_pars(rack, asset_file)
+    ensure_asset_table(base)
+    tools['refresh_assets'](rack, base)
+    asset_file = chosen_asset_file(rack, tools)
+    asset_name = os.path.basename(asset_file)
+    key_name = tools['stored_keys'](base).get(asset_name, tools['default_key'](asset_name))
+    if str(rack.par.Assetkey.eval()) != key_name:
+        rack.par.Assetkey = key_name
+    key_mode = KEY_MODES.index(key_name)
+    key_res = key_resolution(visual)
 
     # The live picture keeps its current input 2 until the new stack has cooked.
     live_stack = src2.path != title.path
@@ -886,7 +1498,7 @@ def install_gif():
         names = CROWN_NAMES
 
     _movie, _key, stack, layer_problems = build_layer(
-        base, title, names, scale_par, x_par, y_par)
+        base, title, names, scale_par, x_par, y_par, asset_file, key_mode, key_res)
     if layer_problems or stack is None:
         if live_stack:
             destroy_named(base, TEMP_NAMES)
@@ -950,8 +1562,20 @@ def install_gif():
             destroy_named(base, TEMP_NAMES)
         return
 
+    # visual finds crown_key and title_card inside crown_stack by these sizes.
+    had_uniforms = uniform_names(visual)
+    layout_ok = bind_named(visual, [
+        ('uGifKeyW', '%d' % key_res[0]),
+        ('uGifKeyH', '%d' % key_res[1]),
+        ('uGifCardW', "op('title_card').par.resolutionw"),
+        ('uGifCardH', "op('title_card').par.resolutionh"),
+    ])
+    added_uniforms = [name for name in LAYOUT_UNIFORMS if name not in had_uniforms]
+
     shader.text = patched
     problems = []
+    if not layout_ok:
+        problems.append('%s could not take the crown_stack layout uniforms' % visual.path)
     problems.extend(cook_errors(visual))
     problems.extend(cook_errors(visual))
     problems.extend(info_hits(visual))
@@ -959,6 +1583,7 @@ def install_gif():
         problems.append('%s is drawing the chequer error picture' % visual.path)
     if problems:
         shader.text = before
+        unbind_named(visual, added_uniforms)
         park_inputs(src2)
         restore_out(base, out_prev)
         try:
@@ -988,6 +1613,9 @@ def install_gif():
         rename_to(base.op('gif_stack'), 'crown_stack')
         rename_to(base.op('gif_key_shader'), 'crown_key_shader')
         rename_to(base.op('gif_stack_shader'), 'crown_stack_shader')
+        # Pixel Shader still names gif_*_shader after the rename. Point it again.
+        for item in relink_shaders(base):
+            print('gif ERROR: %s' % item)
 
     in0 = input_owner(visual, 0)
     in1 = input_owner(visual, 1)
@@ -1003,8 +1631,26 @@ def install_gif():
     print('visual input 2 is %s' % (in2.path if in2 else '(none)'))
     print('REST_LIFT is %.2f. Resting ends sit near y=0.31, centre near y=0.39.' % REST_LIFT)
     print('Gif Scale %s, Gif X %s, Gif Y %s on %s.' % (
-        par_value(scale_par, 210.0), par_value(x_par, 0.5), par_value(y_par, 0.02), base.path))
+        par_value(scale_par, 320.0), par_value(x_par, 0.5), par_value(y_par, 0.02), base.path))
     print('Shader notes: %s.' % ', '.join(notes))
+    movie_now = base.op('crown_movie')
+    key_now = base.op('crown_key')
+    stack_now = base.op('crown_stack')
+    try:
+        print('Asset %s, key %s. Source %sx%s, crown_key %sx%s, crown_stack %sx%s, title_card %sx%s.' % (
+            asset_name, key_name, movie_now.width, movie_now.height, key_now.width, key_now.height,
+            stack_now.width, stack_now.height, title.width, title.height))
+    except Exception as err:
+        print('gif: sizes unreadable: %s' % err)
+    if created_pars:
+        print('Added %s to the Music page of %s.' % (', '.join(created_pars), rack.path))
+    if movie_now is not None:
+        seen = measured_backdrop(movie_now)
+        print('Corner colour as delivered (0-255, RGBA): %s. In the file koth_crown.gif it is about 38 39 1.' % (
+            seen if seen else '(unreadable)'))
+    print(check_title_margin(title))
+    for line in crown_vis_report(base):
+        print(line)
     if removed:
         print('Removed %s.' % ', '.join(removed))
     leftovers = [
@@ -1036,6 +1682,38 @@ def self_check():
     bare, bare_notes = patch_gif(src)
     full, full_notes = prepare_shader(src)
     full_again, _full_notes2 = prepare_shader(full) if full else (None, None)
+    # A shader patched by the half-and-half version moves to the new layout.
+    legacy = patched.replace(SIZE_LINE, SIZE_LEGACY, 1) if patched else None
+    migrated, migrated_notes = patch_gif(legacy) if legacy else (None, None)
+    me_text = open(r'C:\Users\James\Desktop\TOUCH\add_gif.py', encoding='utf-8').read()
+    tools = asset_tools()
+    rows = tools['asset_rows']()
+    try:
+        compile(ASSET_CALLBACKS, 'asset_callbacks', 'exec')
+        callbacks_ok = True
+    except SyntaxError as err:
+        print('asset callbacks: %s' % err)
+        callbacks_ok = False
+    classic = (
+        'float near = smoothstep(0.10, 0.18, d) * smoothstep(0.10, 0.22, luma);',
+        'float vivid = smoothstep(0.22, 0.42, luma) * smoothstep(0.18, 0.36, chroma);',
+        'float a = max(near, vivid) * inside;',
+        'return vec4(s.rgb, a);',
+        'vec3 olive = vec3(39.0, 40.0, 2.0) / 255.0;',
+    )
+    assets_ok = (
+        callbacks_ok
+        and 'koth_crown.gif' in [name for name, _full in rows]
+        and tools['default_key']('x.png') == 'none'
+        and tools['default_key']('koth_crown.gif') == 'classic'
+        and tuple(tools['KEY_MODES']) == KEY_MODES
+        and len(KEY_LABELS) == len(KEY_MODES)
+        and all(line in KEY_SHADER for line in classic)
+        and 'uniform float uKeyMode;' in KEY_SHADER
+        and 'textureSize(sTD2DInputs[0], 0)' in KEY_SHADER
+        and 'texelFetch(sTD2DInputs[1], q, 0)' in STACK_SHADER
+        and 'vUV.y * 2.0' not in STACK_SHADER
+    )
     ok = (
         crown is not None
         and patched is not None
@@ -1049,7 +1727,13 @@ def self_check():
         and patched.count('const float REST_LIFT = 0.20;') == 1
         and 'const float REST_LIFT = 0.30' not in patched
         and patched.count(GIF_BEGIN) == 1
-        and patched.count('size.y /= 2;') == 1
+        and patched.count(SIZE_NEW) == 1
+        and 'size.y /= 2;' not in patched
+        and migrated == patched
+        and 'title size from half stack' in migrated_notes
+        and full.count(SIZE_NEW) == 1
+        and all(('uniform float %s;' % name) in patched for name in LAYOUT_UNIFORMS)
+        and assets_ok
         and 'clamp(texUV, 0.0, 1.0)).a * inside' not in patched
         and '0.5 + texUV.y * 0.5' in patched
         and 'sTD2DInputs[3]' not in patched
@@ -1057,13 +1741,16 @@ def self_check():
         and 'return pow(clamp(v, 0.0, 1.0), 1.35)' in patched
         and 'fragColor = TDOutputSwizzle(vec4(clamp(col, 0.0, 1.0), 1.0));' in patched
         and again.count('// GIF_TITLE begin') == 1
-        and 'create(selectTOP' in open(r'C:\Users\James\Desktop\TOUCH\add_gif.py', encoding='utf-8').read()
-        and 'create(outTOP' in open(r'C:\Users\James\Desktop\TOUCH\add_gif.py', encoding='utf-8').read()
-        and ('wire(stack, ' + 'title') not in open(r'C:\Users\James\Desktop\TOUCH\add_gif.py', encoding='utf-8').read()
+        and 'create(selectTOP' in me_text
+        and 'create(outTOP' in me_text
+        and ('for item in relink_shaders' + '(base):') in me_text
+        and ('wire(stack, ' + 'title') not in me_text
     )
     print('gif self-check: %s' % ('ok' if ok else 'FAILED'))
+    print('assets in %s: %s' % (ASSET_DIR, ', '.join(name for name, _full in rows) or '(none)'))
     if not ok:
-        print('notes %s again %s bare %s full %s' % (notes, notes2, bare_notes, full_notes))
+        print('notes %s again %s bare %s full %s migrated %s assets %s' % (
+            notes, notes2, bare_notes, full_notes, migrated_notes, assets_ok))
     return ok
 
 

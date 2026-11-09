@@ -106,12 +106,53 @@ The resting line becomes a crown on every row, and the gif sits in the
 lower centre under the line. Preview stays on visual. Save (Ctrl+S)
 when it looks right. Next time, open that .toe and the picture is already there.
 
+It is safe to paste the line again. Your Gif sliders, Asset, and Asset Key
+stay as they are. If anything fails, the picture is put back the way it was
+and the textport prints "gif ERROR: ..." lines saying why.
+The last lines it prints include "crown_vis.errors(recurse=True): (none)".
+Anything else there is the reason for a red X (see RED X below).
+
 Gif Scale, Gif X, and Gif Y are on crown_vis, on the Gif page.
 A larger Gif Scale brings the art up toward the line.
 
 To put the flat line back, paste:
 
 exec(open(r'C:\Users\James\Desktop\TOUCH\restore_picture.py', encoding='utf-8').read())
+
+That also removes Asset, Asset Key, and Reload Assets from the Music page.
+Paste the add_gif.py line again to bring the crown and those menus back.
+
+
+GIF SLIDERS (crown_vis, Gif page)
+---------------------------------
+Gif Scale  size of the asset's longer side, in pixels of the 1280x720 picture.
+           koth_crown.gif is 320x320, so 320 shows it 1:1 and 640 is exactly 2x.
+           Those two are the crispest with Asset Key "Olive (classic)".
+           The auto and none keys stay crisp at any size.
+           Range 40 to 640. A 1920x1080 video at 400 is 400 wide, 225 high.
+Gif X      centre of the asset, 0 = left edge, 1 = right edge, 0.5 = middle.
+Gif Y      bottom edge of the asset, 0 = bottom of the picture, 0.40 = 40% up.
+The crown only shows in dark parts of the picture. The terrain lines and
+their glow draw over it.
+
+
+SWITCHING THE CROWN ASSET (music_rack, Music page)
+--------------------------------------------------
+Put a .gif, .png, .jpg, .mp4, or .mov in Desktop\TOUCH\assets, then press
+Reload Assets (Reload Tracks refreshes the list too). Pick it in Asset.
+The picture changes straight away. Nothing is rebuilt and the sliders stay.
+
+Asset Key says how the backdrop is removed:
+  Olive (classic)           the original key, for the olive koth_crown.gif.
+  Olive (auto, de-fringed)  measures the backdrop colour from the asset's
+                            corners and removes it from edge pixels too.
+                            Sharper spike tips, no olive rim. Try it once
+                            classic looks right.
+  None (asset alpha)        no key. Use it for a PNG or video that already
+                            has a transparent background.
+New .png files start on None, everything else on Olive (classic).
+Each asset remembers its own Asset Key. The choice is saved with the .toe
+and kept when add_gif.py runs again.
 
 
 REFRESH THE FLAT TERRAIN (music_rack already exists)
@@ -130,7 +171,35 @@ Onset Threshold  lower = catches more kicks
 Gif Scale        size of the crown gif (on crown_vis, Gif page)
 Gif X            left-right position of the gif
 Gif Y            how high the gif sits
+Asset            which file from Desktop\TOUCH\assets is the crown
+Asset Key        how its backdrop is removed (see SWITCHING THE CROWN ASSET)
+Reload Assets    re-reads the assets folder
 New music: drop files into Desktop\MUSIC_SUNO, then press Reload Tracks.
+
+
+RED X ON crown_vis, OR A SHADER ERROR
+-------------------------------------
+A red X on crown_vis means one operator inside it has an error. Paste:
+
+exec(open(r'C:\Users\James\Desktop\TOUCH\probe_crown.py', encoding='utf-8').read())
+
+It changes nothing. Under "--- red X" it lists every operator in crown_vis
+with its error. One known cause: an extra Movie File In called moviefilein1
+with an empty File, which no script makes. If the probe shows it, delete it:
+
+op('/project1/music_rack/crown_vis/moviefilein1').destroy()
+
+If preview shows a red and blue chequerboard, or add_gif.py printed
+"gif ERROR", paste the add_gif.py line again. If that still fails, paste
+restore_picture.py (flat line back), then add_gif.py.
+Shader text is written by add_gif.py on every run. Edits made directly in
+crown_key_shader or crown_stack_shader are replaced, so change add_gif.py.
+
+The probe also prints the colour the gif really arrives with, the sizes of
+crown_key, crown_stack, and title_card, and the alpha where the title card
+has no letters. That alpha must be 0. Above 0, the title flies across the
+sky as a pale rectangle. add_gif.py fixes that by setting title_card's
+Background Alpha to 0, and prints what it found.
 
 
 VERSIONS IN THIS FOLDER
@@ -138,6 +207,8 @@ VERSIONS IN THIS FOLDER
 add_gif.py                              current picture: crown line and lower gif
 build_music_rack.py                     neon spectrum terrain
 restore_picture.py                      puts the flat line back
+probe_crown.py                          read-only check of crown_vis (red X, sizes, colours)
+inspect_network.py                      read-only list of everything in music_rack
 build_music_rack.v3_terrain.py          same terrain version (backup)
 build_music_rack.v2_cloud.py            older colour cloud version
 build_music_rack.before_visual_rework.py  original

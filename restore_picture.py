@@ -3,11 +3,17 @@
 # points preview at visual again. Does not rebuild the rack and does not
 # delete crown_vis.
 #
+# 2026-11-10: also removes the Asset, Asset Key, and Reload Assets parameters
+#   from the Music page, deletes crown_vis/asset_callbacks and asset_table, and
+#   blanks the uGif* layout uniforms add_gif.py put on visual.
+#
 # Textport:
 #   exec(open(r'C:\Users\James\Desktop\TOUCH\restore_picture.py', encoding='utf-8').read())
 
 RACK = '/project1/music_rack'
 BUILDER = r'C:\Users\James\Desktop\TOUCH\build_music_rack.py'
+ASSET_PARS = ('Asset', 'Assetkey', 'Reloadassets')
+ASSET_NODES = ('asset_callbacks', 'asset_table')
 
 UNIFORMS = (
     ('uTime', "op('vis_features')['time']"),
@@ -125,6 +131,50 @@ def restore_uniforms(visual):
     return ok
 
 
+def clear_gif_uniforms(visual):
+    """Blank uGif* slots. The original shader has no such uniforms, and their
+    expressions point into crown_vis."""
+    cleared = []
+    for index, name in vec_slots(visual):
+        if not name.startswith('uGif'):
+            continue
+        try:
+            setattr(visual.par, 'vec%dname' % index, '')
+            value = getattr(visual.par, 'vec%dvaluex' % index)
+            value.expr = ''
+            value.mode = ParMode.CONSTANT  # noqa: F821
+            value.val = 0
+            cleared.append(name)
+        except Exception as err:
+            print('restore: could not clear %s: %s' % (name, err))
+    return cleared
+
+
+def remove_asset_menu(rack):
+    """Callbacks first, so removing the parameters triggers nothing."""
+    removed = []
+    base = rack.op('crown_vis')
+    for name in ASSET_NODES:
+        node = base.op(name) if base is not None else None
+        if node is None:
+            continue
+        try:
+            node.destroy()
+            removed.append('crown_vis/' + name)
+        except Exception as err:
+            print('restore: could not delete %s: %s' % (node.path, err))
+    for name in ASSET_PARS:
+        par = getattr(rack.par, name, None)
+        if par is None:
+            continue
+        try:
+            par.destroy()
+            removed.append('par ' + name)
+        except Exception as err:
+            print('restore: could not remove parameter %s: %s' % (name, err))
+    return removed
+
+
 def restore_title_input(visual, rack):
     """Point visual input 2 back at title_card when the gif stack is on it."""
     title = rack.op('title_card')
@@ -174,7 +224,9 @@ def restore():
     except Exception as err:
         print('restore: pixeldat: %s' % err)
     restore_uniforms(visual)
+    cleared = clear_gif_uniforms(visual)
     input2 = restore_title_input(visual, rack)
+    asset_removed = remove_asset_menu(rack)
 
     wired = False
     try:
@@ -200,6 +252,8 @@ def restore():
     print('preview input is %s' % input_path(preview))
     print('visual input 2 is %s' % input2)
     print('visual_shader now holds the original terrain text (%s chars).' % len(shader.text))
+    print('cleared uniforms on visual: %s' % (', '.join(cleared) or '(none)'))
+    print('removed asset menu: %s' % (', '.join(asset_removed) or '(nothing to remove)'))
     try:
         print('visual resolution %sx%s' % (visual.width, visual.height))
     except Exception:
